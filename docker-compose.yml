@@ -1,8 +1,9 @@
 services:
-  api:
+  mydream-api:
     build:
       context: .
       target: dev
+    image: mydream-api
     container_name: mydream-api
     ports:
       - "3000:3000"
@@ -11,5 +12,6 @@ services:
       - /app/node_modules
     env_file:
       - .env
+    restart: unless-stopped
     stdin_open: true
     tty: true
