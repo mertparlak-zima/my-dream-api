@@ -1,8 +1,23 @@
 import type { Context } from 'hono';
+import { ZodError } from 'zod';
 import { AppError } from '../errors/AppError';
 import { IS_DEV } from '../config';
 
 export function errorHandler(err: Error, c: Context): Response {
+  if (err instanceof ZodError) {
+    return c.json(
+      {
+        success: false,
+        error: {
+          code: 'VALIDATION_ERROR',
+          message: 'Istek verileri gecersiz.',
+          issues: IS_DEV ? err.issues : undefined,
+        },
+      },
+      400,
+    );
+  }
+
   if (err instanceof AppError) {
     return c.json(
       {
