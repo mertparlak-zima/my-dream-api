@@ -5,12 +5,14 @@ import { interpretersService } from './interpreters.service';
 
 export const interpretersRoutes = new Hono();
 
-interpretersRoutes.get('/', (c) => {
-  interpretersService.listActiveInterpreters();
-  return c.json({ success: true });
+interpretersRoutes.get('/', async (c) => {
+  const interpreters = await interpretersService.listActiveInterpreters();
+
+  return c.json({ success: true, data: interpreters });
 });
 
-interpretersRoutes.get('/:id', zValidator('param', interpreterIdParamSchema), (c) => {
-  interpretersService.getInterpreterById();
-  return c.json({ success: true });
+interpretersRoutes.get('/:id', zValidator('param', interpreterIdParamSchema), async (c) => {
+  const interpreter = await interpretersService.getInterpreterById(c.req.valid('param').id);
+
+  return c.json({ success: true, data: interpreter });
 });

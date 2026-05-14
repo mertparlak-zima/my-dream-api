@@ -1,9 +1,17 @@
 import { createMiddleware } from 'hono/factory';
 import { jwtVerify } from 'jose';
 import { AuthError } from '../errors/AuthError';
-import { JWT_SECRET } from '../config';
+import { DEV_AUTH_ENABLED, JWT_SECRET } from '../config';
 
 export const authMiddleware = createMiddleware(async (c, next) => {
+  const devUserId = c.req.header('X-Dev-User-Id');
+
+  if (DEV_AUTH_ENABLED && devUserId) {
+    c.set('userId', devUserId);
+    await next();
+    return;
+  }
+
   const authorization = c.req.header('Authorization');
   const token = authorization?.startsWith('Bearer ') ? authorization.slice('Bearer '.length) : undefined;
 

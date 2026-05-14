@@ -1,4 +1,22 @@
 services:
+  mydream-db:
+    image: postgres:16-alpine
+    container_name: mydream-db
+    ports:
+      - "5433:5432"
+    environment:
+      POSTGRES_DB: mydream
+      POSTGRES_USER: mydream
+      POSTGRES_PASSWORD: mydream
+    volumes:
+      - mydream-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mydream -d mydream"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
   mydream-api:
     build:
       context: .
@@ -7,11 +25,22 @@ services:
     container_name: mydream-api
     ports:
       - "3000:3000"
+    depends_on:
+      mydream-db:
+        condition: service_healthy
     volumes:
       - .:/app
       - /app/node_modules
     env_file:
       - .env
+    environment:
+      DATABASE_URL: postgres://mydream:mydream@mydream-db:5432/mydream
+      JWT_SECRET: dev-jwt-secret-change-me
+      NODE_ENV: development
+      DEV_AUTH_ENABLED: "true"
     restart: unless-stopped
     stdin_open: true
     tty: true
+
+volumes:
+  mydream-db-data:

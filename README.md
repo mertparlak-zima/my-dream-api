@@ -1,11 +1,95 @@
-To install dependencies:
+# My Dream API
+
+## Local Development
+
+Install dependencies:
+
 ```sh
 bun install
 ```
 
-To run:
+Start API and local Postgres with Docker:
+
 ```sh
-bun run dev
+docker compose up -d
 ```
 
-open http://localhost:3000
+Apply migrations and seed local data:
+
+```sh
+bun run db:migrate
+bun run db:seed
+```
+
+Open:
+
+```text
+http://localhost:3000
+```
+
+Health check:
+
+```sh
+curl http://localhost:3000/health
+```
+
+## Local Database
+
+Docker Compose starts a dedicated local Postgres database for this project.
+
+| Field | Value |
+| :--- | :--- |
+| Host from local machine | `localhost` |
+| Host from API container | `mydream-db` |
+| Host port | `5433` |
+| Container port | `5432` |
+| Database | `mydream` |
+| Username | `mydream` |
+| Password | `mydream` |
+
+Use this connection string from the host machine:
+
+```env
+DATABASE_URL=postgres://mydream:mydream@localhost:5433/mydream
+```
+
+The API container uses this internal Docker connection string:
+
+```env
+DATABASE_URL=postgres://mydream:mydream@mydream-db:5432/mydream
+```
+
+Drizzle tracks applied migrations in:
+
+```text
+drizzle.__drizzle_migrations
+```
+
+## Dev Auth Bypass
+
+Local Docker runs with `NODE_ENV=development` and `DEV_AUTH_ENABLED=true`.
+Protected endpoints can be tested with the seeded dev user:
+
+```text
+00000000-0000-4000-8000-000000000001
+```
+
+Example:
+
+```sh
+curl -H "X-Dev-User-Id: 00000000-0000-4000-8000-000000000001" \
+  http://localhost:3000/users/me
+```
+
+Production does not accept `X-Dev-User-Id`; use `Authorization: Bearer <supabase_jwt>`.
+
+## Useful Commands
+
+```sh
+bun run check
+bun run lint
+bun run build
+bun run db:generate
+bun run db:migrate
+bun run db:seed
+```
