@@ -1,4 +1,4 @@
-import type { Plan } from '../constants/domain';
+import { PLAN, type Plan } from '../constants/domain';
 
 export const RETRY_CONFIG = {
   MAX_COUNT: 3,
@@ -34,7 +34,7 @@ export const DREAM_CONFIG = {
 } as const;
 
 export const PLAN_LIMITS: Record<Plan, number> = {
-  FREE: 1,
-  PRO: 7,
-  MAX: 30,
+  [PLAN.FREE]: 1,
+  [PLAN.PRO]: 7,
+  [PLAN.MAX]: 30,
 } as const;

@@ -1,4 +1,5 @@
 import { index, integer, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core';
+import { DREAM_STATUS } from '../../constants/domain';
 import { dreamStatusEnum } from '../../db/enums';
 import { interpreters } from '../interpreters/interpreters.schema';
 import { users } from '../users/users.schema';
@@ -15,7 +16,7 @@ export const dreams = pgTable(
       .references(() => interpreters.id, { onDelete: 'restrict' }),
     content: text('content').notNull(),
     interpretation: text('interpretation'),
-    status: dreamStatusEnum('status').notNull().default('PENDING'),
+    status: dreamStatusEnum('status').notNull().default(DREAM_STATUS.PENDING),
     userRating: integer('user_rating'),
     userFeedbackText: text('user_feedback_text'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),

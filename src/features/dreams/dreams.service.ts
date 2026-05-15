@@ -1,6 +1,11 @@
 import { and, desc, eq, inArray, sql } from 'drizzle-orm';
 import { PLAN_LIMITS } from '../../config';
-import type { CreditTransactionType, DreamStatus } from '../../constants/domain';
+import {
+  CREDIT_TRANSACTION_TYPE,
+  DREAM_STATUS,
+  PLAN,
+  type DreamStatus,
+} from '../../constants/domain';
 import { db } from '../../db';
 import { CreditError } from '../../errors/CreditError';
 import { ForbiddenError } from '../../errors/ForbiddenError';
@@ -52,9 +57,12 @@ type DreamSelectRow = {
   interpreterSortOrder: number;
 };
 
-type SpendTransactionType = Extract<CreditTransactionType, 'USED_WEEKLY' | 'USED_EXTRA'>;
+type SpendTransactionType = typeof CREDIT_TRANSACTION_TYPE.USED_WEEKLY | typeof CREDIT_TRANSACTION_TYPE.USED_EXTRA;
 
-const SPEND_TRANSACTION_TYPES: SpendTransactionType[] = ['USED_WEEKLY', 'USED_EXTRA'];
+const SPEND_TRANSACTION_TYPES: SpendTransactionType[] = [
+  CREDIT_TRANSACTION_TYPE.USED_WEEKLY,
+  CREDIT_TRANSACTION_TYPE.USED_EXTRA,
+];
 const PROCESSING_DELAY_MS = 300;
 const COMPLETION_DELAY_MS = 900;
 const MOCK_FAIL_TAG = '[mock-fail]';
@@ -160,8 +168,8 @@ async function processMockDream(dreamId: string): Promise<void> {
   const now = new Date();
   const [processingDream] = await db
     .update(dreams)
-    .set({ status: 'PROCESSING', updatedAt: now })
-    .where(and(eq(dreams.id, dreamId), eq(dreams.status, 'PENDING')))
+    .set({ status: DREAM_STATUS.PROCESSING, updatedAt: now })
+    .where(and(eq(dreams.id, dreamId), eq(dreams.status, DREAM_STATUS.PENDING)))
     .returning({ id: dreams.id });
 
   if (!processingDream) {
@@ -183,15 +191,15 @@ async function processMockDream(dreamId: string): Promise<void> {
     .where(eq(dreams.id, dreamId))
     .limit(1);
 
-  if (!dream || dream.status !== 'PROCESSING') {
+  if (!dream || dream.status !== DREAM_STATUS.PROCESSING) {
     return;
   }
 
   if (dream.content.includes(MOCK_FAIL_TAG)) {
     const [failedDream] = await db
       .update(dreams)
-      .set({ status: 'FAILED', updatedAt: new Date() })
-      .where(and(eq(dreams.id, dreamId), eq(dreams.status, 'PROCESSING')))
+      .set({ status: DREAM_STATUS.FAILED, updatedAt: new Date() })
+      .where(and(eq(dreams.id, dreamId), eq(dreams.status, DREAM_STATUS.PROCESSING)))
       .returning({ id: dreams.id });
 
     if (failedDream) {
@@ -204,11 +212,11 @@ async function processMockDream(dreamId: string): Promise<void> {
   await db
     .update(dreams)
     .set({
-      status: 'COMPLETED',
+      status: DREAM_STATUS.COMPLETED,
       interpretation: buildMockInterpretation(dream.content, dream.interpreterName),
       updatedAt: new Date(),
     })
-    .where(and(eq(dreams.id, dreamId), eq(dreams.status, 'PROCESSING')));
+    .where(and(eq(dreams.id, dreamId), eq(dreams.status, DREAM_STATUS.PROCESSING)));
 }
 
 async function refundDreamCredit(userId: string, dreamId: string): Promise<void> {
@@ -216,7 +224,10 @@ async function refundDreamCredit(userId: string, dreamId: string): Promise<void>
     const [existingRefund] = await tx
       .select({ id: creditTransactions.id })
       .from(creditTransactions)
-      .where(and(eq(creditTransactions.relatedDreamId, dreamId), eq(creditTransactions.transactionType, 'REFUNDED')))
+      .where(and(
+        eq(creditTransactions.relatedDreamId, dreamId),
+        eq(creditTransactions.transactionType, CREDIT_TRANSACTION_TYPE.REFUNDED),
+      ))
       .limit(1);
 
     if (existingRefund) {
@@ -242,12 +253,12 @@ async function refundDreamCredit(userId: string, dreamId: string): Promise<void>
 
     await tx.insert(creditTransactions).values({
       userId,
-      transactionType: 'REFUNDED',
+      transactionType: CREDIT_TRANSACTION_TYPE.REFUNDED,
       amount: 1,
       relatedDreamId: dreamId,
     });
 
-    if (spend.transactionType === 'USED_WEEKLY') {
+    if (spend.transactionType === CREDIT_TRANSACTION_TYPE.USED_WEEKLY) {
       await tx
         .update(users)
         .set({
@@ -287,20 +298,22 @@ export const dreamsService = {
         throw new NotFoundError('Yorumcu bulunamadi.');
       }
 
-      if (interpreter.isPremium && user.plan === 'FREE') {
+      if (interpreter.isPremium && user.plan === PLAN.FREE) {
         throw new ForbiddenError('Premium yorumcu icin aktif abonelik gerekir.');
       }
 
       const weeklyLimit = PLAN_LIMITS[user.plan];
-      const spendType: SpendTransactionType = user.weeklyDreamCount < weeklyLimit ? 'USED_WEEKLY' : 'USED_EXTRA';
+      const spendType: SpendTransactionType = user.weeklyDreamCount < weeklyLimit
+        ? CREDIT_TRANSACTION_TYPE.USED_WEEKLY
+        : CREDIT_TRANSACTION_TYPE.USED_EXTRA;
 
-      if (spendType === 'USED_EXTRA' && user.extraCredits <= 0) {
+      if (spendType === CREDIT_TRANSACTION_TYPE.USED_EXTRA && user.extraCredits <= 0) {
         throw new CreditError();
       }
 
       const now = new Date();
 
-      if (spendType === 'USED_WEEKLY') {
+      if (spendType === CREDIT_TRANSACTION_TYPE.USED_WEEKLY) {
         await tx
           .update(users)
           .set({
@@ -324,7 +337,7 @@ export const dreamsService = {
           userId,
           interpreterId: interpreter.id,
           content: input.content,
-          status: 'PENDING',
+          status: DREAM_STATUS.PENDING,
         })
         .returning();
 
@@ -377,7 +390,7 @@ export const dreamsService = {
   async submitFeedback(userId: string, dreamId: string, input: SubmitDreamFeedbackInput): Promise<DreamResponse> {
     const dream = await findOwnedDream(userId, dreamId);
 
-    if (dream.status !== 'COMPLETED') {
+    if (dream.status !== DREAM_STATUS.COMPLETED) {
       throw new ForbiddenError('Sadece tamamlanmis ruyalar icin geri bildirim verilebilir.');
     }
 

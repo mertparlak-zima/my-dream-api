@@ -1,4 +1,5 @@
 import { db, queryClient } from '.';
+import { AUTH_PROVIDER, PLAN } from '../constants/domain';
 import { aiModels } from '../features/ai_models/models.schema';
 import { interpreters } from '../features/interpreters/interpreters.schema';
 import { users } from '../features/users/users.schema';
@@ -46,7 +47,7 @@ async function seed(): Promise<void> {
       id: MOCK_MODEL_ID,
       name: 'Mock Dream Interpreter',
       openrouterModelId: 'mock/my-dream-interpreter',
-      requiredPlan: 'FREE',
+      requiredPlan: PLAN.FREE,
       isActive: true,
       contextLength: 8000,
       pricePrompt: '0',
@@ -58,7 +59,7 @@ async function seed(): Promise<void> {
       set: {
         name: 'Mock Dream Interpreter',
         openrouterModelId: 'mock/my-dream-interpreter',
-        requiredPlan: 'FREE',
+        requiredPlan: PLAN.FREE,
         isActive: true,
         contextLength: 8000,
         pricePrompt: '0',
@@ -97,11 +98,11 @@ async function seed(): Promise<void> {
     .values({
       id: DEV_USER_ID,
       email: 'dev@mydream.local',
-      authProvider: 'GOOGLE',
+      authProvider: AUTH_PROVIDER.GOOGLE,
       providerId: 'dev-provider',
       firstName: 'Dev',
       lastName: 'User',
-      plan: 'FREE',
+      plan: PLAN.FREE,
       weeklyDreamCount: 0,
       limitResetDate: getNextWeeklyResetDate(now),
       extraCredits: 5,
@@ -111,11 +112,11 @@ async function seed(): Promise<void> {
       target: users.id,
       set: {
         email: 'dev@mydream.local',
-        authProvider: 'GOOGLE',
+        authProvider: AUTH_PROVIDER.GOOGLE,
         providerId: 'dev-provider',
         firstName: 'Dev',
         lastName: 'User',
-        plan: 'FREE',
+        plan: PLAN.FREE,
         weeklyDreamCount: 0,
         limitResetDate: getNextWeeklyResetDate(now),
         extraCredits: 5,

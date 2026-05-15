@@ -1,11 +1,12 @@
 import { boolean, integer, numeric, pgTable, timestamp, uuid, varchar } from 'drizzle-orm/pg-core';
+import { PLAN } from '../../constants/domain';
 import { planEnum } from '../../db/enums';
 
 export const aiModels = pgTable('ai_models', {
   id: uuid('id').defaultRandom().primaryKey(),
   name: varchar('name', { length: 160 }).notNull(),
   openrouterModelId: varchar('openrouter_model_id', { length: 255 }).notNull().unique(),
-  requiredPlan: planEnum('required_plan').notNull().default('FREE'),
+  requiredPlan: planEnum('required_plan').notNull().default(PLAN.FREE),
   isActive: boolean('is_active').notNull().default(true),
   contextLength: integer('context_length'),
   pricePrompt: numeric('price_prompt', { precision: 12, scale: 8 }),
