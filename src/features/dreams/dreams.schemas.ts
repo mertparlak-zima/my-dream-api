@@ -6,6 +6,10 @@ export const createDreamSchema = z.object({
   interpreter_id: z.uuid(),
 });
 
+export const listDreamsQuerySchema = z.object({
+  limit: z.coerce.number().int().min(1).max(100).default(20),
+});
+
 export const dreamIdParamSchema = z.object({
   id: z.uuid(),
 });
@@ -16,4 +20,5 @@ export const submitDreamFeedbackSchema = z.object({
 });
 
 export type CreateDreamInput = z.infer<typeof createDreamSchema>;
+export type ListDreamsQuery = z.infer<typeof listDreamsQuerySchema>;
 export type SubmitDreamFeedbackInput = z.infer<typeof submitDreamFeedbackSchema>;
