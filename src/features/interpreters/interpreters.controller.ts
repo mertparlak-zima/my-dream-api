@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { zValidator } from '@hono/zod-validator';
+import { zValidator } from '../../utils/zValidator';
 import { interpreterIdParamSchema } from './interpreters.schemas';
 import { interpretersService } from './interpreters.service';
 

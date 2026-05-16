@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
-import { zValidator } from '@hono/zod-validator';
 import { authMiddleware } from '../../middlewares/authMiddleware';
 import { getAuthUserId } from '../../utils/authContext';
+import { zValidator } from '../../utils/zValidator';
 import { createDreamSchema, dreamIdParamSchema, listDreamsQuerySchema, submitDreamFeedbackSchema } from './dreams.schemas';
 import { dreamsService } from './dreams.service';
 

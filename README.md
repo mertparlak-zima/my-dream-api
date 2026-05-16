@@ -11,7 +11,7 @@ bun install
 Start API and local Postgres with Docker:
 
 ```sh
-docker compose up -d
+bun run docker:up
 ```
 
 Apply migrations and seed local data:
@@ -31,6 +31,13 @@ Health check:
 
 ```sh
 curl http://localhost:3000/health
+```
+
+API documentation:
+
+```text
+http://localhost:3000/docs
+http://localhost:3000/openapi.json
 ```
 
 ## Local Database
