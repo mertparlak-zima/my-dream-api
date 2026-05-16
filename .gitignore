@@ -4,10 +4,12 @@ node_modules/
 # env
 .env
 .env.local
+.env.test
 .env.production
 
 # build
 dist/
+coverage/
 
 # os
 .DS_Store

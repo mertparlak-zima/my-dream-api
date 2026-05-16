@@ -96,7 +96,20 @@ Production does not accept `X-Dev-User-Id`; use `Authorization: Bearer <supabase
 bun run check
 bun run lint
 bun run build
+bun run test
+bun run test:watch
+bun run test:coverage
 bun run db:generate
 bun run db:migrate
 bun run db:seed
 ```
+
+## Tests
+
+Copy `.env.test.example` into your local env setup and point `TEST_DATABASE_URL` at the local Postgres instance used for API tests.
+
+The Vitest foundation includes reusable fixtures in `tests/helpers/fixtures.ts` and a cleanup helper that only removes rows created by tests.
+
+DB-backed test files should call `setupDatabaseTestFile()` from `tests/helpers/lifecycle.ts`. Route tests can use `appRequest()` from `tests/helpers/app.ts`.
+
+Run DB-backed Vitest commands sequentially because they share the configured local Postgres test database and cleanup markers.
