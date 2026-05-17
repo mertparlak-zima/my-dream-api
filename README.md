@@ -90,6 +90,26 @@ curl -H "X-Dev-User-Id: 00000000-0000-4000-8000-000000000001" \
 
 Production does not accept `X-Dev-User-Id`; use `Authorization: Bearer <supabase_jwt>`.
 
+## Mock Policy
+
+- `X-Dev-User-Id` is development/test only and must fail closed in production.
+- Mock processors, mock models and fixtures do not belong in production runtime paths.
+- Production requires real auth config and real external-service config instead of mock fallbacks.
+- Canonical inventory and allowlist/denylist: [`../../../project-docs/my-dream/my-dream-api/technical-infrastructure.md`](../../../project-docs/my-dream/my-dream-api/technical-infrastructure.md).
+
+## Production Env Contract
+
+Production startup validates required env before serving traffic. The single source of truth is the Zod schema in `src/config/env.ts`; invalid or missing production values fail startup with field-level errors.
+
+- `DATABASE_URL`
+- `SUPABASE_URL`
+- `OPENROUTER_API_KEY`
+- `CORS_ALLOWED_ORIGINS` with explicit origins, never `*`
+- `RATE_LIMIT_WINDOW_MS` and `RATE_LIMIT_MAX_REQUESTS` as positive integers
+- `JWT_SECRET` for legacy HS256 verification or Supabase JWKS config derived from `SUPABASE_URL`
+
+`DEV_AUTH_ENABLED=true` is rejected in production. Supabase JWKS can be overridden with `SUPABASE_JWKS_URL`; issuer can be overridden with `SUPABASE_JWT_ISSUER`.
+
 ## Useful Commands
 
 ```sh

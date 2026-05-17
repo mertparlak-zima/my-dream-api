@@ -18,7 +18,7 @@ app.onError(errorHandler);
 app.use(
   '*',
   cors({
-    origin: CORS_CONFIG.ALLOWED_ORIGINS.length > 0 ? CORS_CONFIG.ALLOWED_ORIGINS : '*',
+    origin: CORS_CONFIG.ALLOWED_ORIGINS,
   }),
 );
 app.use('*', createRateLimitMiddleware());

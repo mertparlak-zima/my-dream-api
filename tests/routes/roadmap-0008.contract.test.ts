@@ -54,6 +54,15 @@ describe('roadmap 0008 route contracts', () => {
     });
   });
 
+  it('does not emit CORS allow-origin when no origin allowlist is configured', async () => {
+    const response = await appRequest('/health', {
+      headers: { Origin: 'https://example.com' },
+    });
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get('Access-Control-Allow-Origin')).toBeNull();
+  });
+
   it('GET /openapi.json returns parseable OpenAPI JSON with key documented paths', async () => {
     const response = await appRequest('/openapi.json');
     const body = await response.json();

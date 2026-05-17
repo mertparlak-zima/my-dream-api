@@ -1,4 +1,9 @@
 import { PLAN, type Plan } from '../constants/domain';
+import { parseRuntimeEnv } from './env';
+
+export { parseRuntimeEnv };
+
+export const runtimeEnv = parseRuntimeEnv();
 
 export const RETRY_CONFIG = {
   MAX_COUNT: 3,
@@ -6,23 +11,27 @@ export const RETRY_CONFIG = {
   STATUS_CODES: [429, 500, 502, 503],
 } as const;
 
-export const PORT = Number(process.env.PORT) || 3000;
-export const NODE_ENV = process.env.NODE_ENV || 'development';
+export const PORT = runtimeEnv.PORT;
+export const NODE_ENV = runtimeEnv.NODE_ENV;
 export const IS_DEV = NODE_ENV === 'development';
+export const IS_TEST = NODE_ENV === 'test';
+export const IS_PRODUCTION = NODE_ENV === 'production';
 
-export const DATABASE_URL = process.env.DATABASE_URL;
-export const JWT_SECRET = process.env.JWT_SECRET;
-export const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
-export const SUPABASE_URL = process.env.SUPABASE_URL;
-export const DEV_AUTH_ENABLED = IS_DEV && process.env.DEV_AUTH_ENABLED === 'true';
+export const DATABASE_URL = runtimeEnv.DATABASE_URL;
+export const JWT_SECRET = runtimeEnv.JWT_SECRET;
+export const OPENROUTER_API_KEY = runtimeEnv.OPENROUTER_API_KEY;
+export const SUPABASE_URL = runtimeEnv.SUPABASE_URL;
+export const SUPABASE_JWKS_URL = runtimeEnv.SUPABASE_JWKS_URL;
+export const SUPABASE_JWT_ISSUER = runtimeEnv.SUPABASE_JWT_ISSUER;
+export const DEV_AUTH_ENABLED = runtimeEnv.DEV_AUTH_ENABLED;
 
 export const CORS_CONFIG = {
-  ALLOWED_ORIGINS: process.env.CORS_ALLOWED_ORIGINS?.split(',').map((origin: string) => origin.trim()).filter(Boolean) ?? [],
+  ALLOWED_ORIGINS: runtimeEnv.CORS_ALLOWED_ORIGINS,
 } as const;
 
 export const RATE_LIMIT_CONFIG = {
-  WINDOW_MS: Number(process.env.RATE_LIMIT_WINDOW_MS) || 60_000,
-  MAX_REQUESTS: Number(process.env.RATE_LIMIT_MAX_REQUESTS) || 120,
+  WINDOW_MS: runtimeEnv.RATE_LIMIT_WINDOW_MS,
+  MAX_REQUESTS: runtimeEnv.RATE_LIMIT_MAX_REQUESTS,
 } as const;
 
 export const DREAM_CONFIG = {
