@@ -18,7 +18,7 @@ Apply migrations and seed local data:
 
 ```sh
 bun run db:migrate
-bun run db:seed
+bun run db:seed:local
 ```
 
 Open:
@@ -115,6 +115,18 @@ Production startup validates required env before serving traffic. The single sou
 - `JWT_SECRET` for legacy HS256 verification or Supabase JWKS config derived from `SUPABASE_URL`
 
 `DEV_AUTH_ENABLED=true` is rejected in production. Supabase JWKS can be overridden with `SUPABASE_JWKS_URL`; issuer can be overridden with `SUPABASE_JWT_ISSUER`.
+
+## Seed Safety
+
+Seed commands require an explicit mode:
+
+```sh
+bun run db:seed:local
+```
+
+Local seed creates the canonical model/interpreters plus the local dev user. Seeding is disabled when `NODE_ENV=production`; production data must not be bootstrapped from this repository. Local model config can use `SEED_OPENROUTER_MODEL_ID` and rejects `mock/*` model ids.
+
+Production deploys should run committed migrations with `bun run db:migrate`. Do not use `db:push` for production schema changes.
 
 ## Useful Commands
 

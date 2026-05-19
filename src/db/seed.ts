@@ -4,9 +4,11 @@ import { aiModels } from '../features/ai_models/models.schema';
 import { interpreters } from '../features/interpreters/interpreters.schema';
 import { users } from '../features/users/users.schema';
 import { getNextWeeklyResetDate } from '../utils/date';
+import { parseSeedPolicy, type SeedPolicy } from './seed.policy';
 
 const DEV_USER_ID = '00000000-0000-4000-8000-000000000001';
-const MOCK_MODEL_ID = '10000000-0000-4000-8000-000000000001';
+const DEFAULT_MODEL_ID = '10000000-0000-4000-8000-000000000001';
+type SeedDatabase = Pick<typeof db, 'insert'>;
 
 const seedInterpreters = [
   {
@@ -38,15 +40,13 @@ const seedInterpreters = [
   },
 ] as const;
 
-async function seed(): Promise<void> {
-  const now = new Date();
-
-  await db
+async function seedModel(seedDb: SeedDatabase, policy: SeedPolicy, now: Date): Promise<void> {
+  await seedDb
     .insert(aiModels)
     .values({
-      id: MOCK_MODEL_ID,
-      name: 'Mock Dream Interpreter',
-      openrouterModelId: 'mock/my-dream-interpreter',
+      id: DEFAULT_MODEL_ID,
+      name: policy.modelName,
+      openrouterModelId: policy.openrouterModelId,
       requiredPlan: PLAN.FREE,
       isActive: true,
       contextLength: 8000,
@@ -57,8 +57,8 @@ async function seed(): Promise<void> {
     .onConflictDoUpdate({
       target: aiModels.id,
       set: {
-        name: 'Mock Dream Interpreter',
-        openrouterModelId: 'mock/my-dream-interpreter',
+        name: policy.modelName,
+        openrouterModelId: policy.openrouterModelId,
         requiredPlan: PLAN.FREE,
         isActive: true,
         contextLength: 8000,
@@ -67,13 +67,15 @@ async function seed(): Promise<void> {
         updatedAt: now,
       },
     });
+}
 
+async function seedInterpreterRows(seedDb: SeedDatabase, now: Date): Promise<void> {
   for (const interpreter of seedInterpreters) {
-    await db
+    await seedDb
       .insert(interpreters)
       .values({
         ...interpreter,
-        modelId: MOCK_MODEL_ID,
+        modelId: DEFAULT_MODEL_ID,
         isActive: true,
         updatedAt: now,
       })
@@ -85,15 +87,17 @@ async function seed(): Promise<void> {
           systemPrompt: interpreter.systemPrompt,
           imageUrl: interpreter.imageUrl,
           isPremium: interpreter.isPremium,
-          modelId: MOCK_MODEL_ID,
+          modelId: DEFAULT_MODEL_ID,
           isActive: true,
           sortOrder: interpreter.sortOrder,
           updatedAt: now,
         },
       });
   }
+}
 
-  await db
+async function seedDevUser(seedDb: SeedDatabase, now: Date): Promise<void> {
+  await seedDb
     .insert(users)
     .values({
       id: DEV_USER_ID,
@@ -123,12 +127,24 @@ async function seed(): Promise<void> {
         updatedAt: now,
       },
     });
+}
 
-  console.info(`Seed completed. Dev user id: ${DEV_USER_ID}`);
+async function seed(policy: SeedPolicy): Promise<void> {
+  const now = new Date();
+
+  await db.transaction(async (tx) => {
+    await seedModel(tx, policy, now);
+    await seedInterpreterRows(tx, now);
+
+    await seedDevUser(tx, now);
+  });
+
+  console.info(`Seed completed. Mode: ${policy.mode}. Model: ${policy.openrouterModelId}.`);
+  console.info(`Local dev user id: ${DEV_USER_ID}`);
 }
 
 try {
-  await seed();
+  await seed(parseSeedPolicy());
 } finally {
   await queryClient.end();
 }
