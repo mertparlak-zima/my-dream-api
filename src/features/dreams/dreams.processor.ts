@@ -1,33 +1,34 @@
 import { and, desc, eq, inArray, sql } from 'drizzle-orm';
+import { DREAM_PROCESSING_CONFIG } from '../../config';
 import { CREDIT_TRANSACTION_TYPE, DREAM_STATUS } from '../../constants/domain';
 import { db } from '../../db';
+import { aiModels } from '../ai_models/models.schema';
 import { creditTransactions } from '../credits/credits.schema';
 import { interpreters } from '../interpreters/interpreters.schema';
 import { users } from '../users/users.schema';
 import { dreams } from './dreams.schema';
+import type { DreamInterpretationProvider } from './dreams.provider';
+import { OpenRouterDreamInterpretationProvider } from './openrouter.provider';
 
 type SpendTransactionType =
   | typeof CREDIT_TRANSACTION_TYPE.USED_WEEKLY
   | typeof CREDIT_TRANSACTION_TYPE.USED_EXTRA;
+
+export type ProcessDreamOptions = {
+  completionDelayMs?: number;
+  provider?: DreamInterpretationProvider;
+};
 
 const SPEND_TRANSACTION_TYPES: SpendTransactionType[] = [
   CREDIT_TRANSACTION_TYPE.USED_WEEKLY,
   CREDIT_TRANSACTION_TYPE.USED_EXTRA,
 ];
 
-const PROCESSING_DELAY_MS = 300;
-const COMPLETION_DELAY_MS = 900;
-const MOCK_FAIL_TAG = '[mock-fail]';
+const defaultProvider = new OpenRouterDreamInterpretationProvider();
+let scheduledProvider: DreamInterpretationProvider = defaultProvider;
 
-function buildMockInterpretation(content: string, interpreterName: string): string {
-  const normalizedContent = content.replace(/\s+/g, ' ').trim();
-  const excerpt = normalizedContent.length > 220 ? `${normalizedContent.slice(0, 220)}...` : normalizedContent;
-
-  return [
-    `${interpreterName} yorumu: Bu ruya, zihninin son donemde islemeye calistigi bir duyguyu sembollerle one cikariyor.`,
-    `Ana iz: "${excerpt}" parcasinda guven, merak ve kontrol ihtiyaci ayni anda gorunuyor.`,
-    'Pratik okuma: Bugun tek bir karari kucuk bir adima indir ve ruyadaki en guclu imgeyi gunluk notuna ekle.',
-  ].join('\n\n');
+export function configureDreamProcessingProvider(provider: DreamInterpretationProvider): void {
+  scheduledProvider = provider;
 }
 
 function sleep(ms: number): Promise<void> {
@@ -36,21 +37,34 @@ function sleep(ms: number): Promise<void> {
   });
 }
 
-export function scheduleMockDreamProcessing(dreamId: string): void {
-  setTimeout(() => {
-    void processMockDream(dreamId).catch(
-      (error: unknown) => {
-        console.error('[DREAM_MOCK_WORKER_ERROR]', error);
-      },
-    );
-  }, PROCESSING_DELAY_MS);
+function sanitizeInterpretation(interpretation: string): string {
+  const normalized = interpretation
+    .split('\u0000').join('')
+    .replace(/\r\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+
+  if (normalized.length <= DREAM_PROCESSING_CONFIG.MAX_INTERPRETATION_LENGTH) {
+    return normalized;
+  }
+
+  return normalized.slice(0, DREAM_PROCESSING_CONFIG.MAX_INTERPRETATION_LENGTH).trimEnd();
 }
 
-export async function processMockDream(
+export function scheduleDreamProcessing(dreamId: string): void {
+  setTimeout(() => {
+    void processDream(dreamId, { provider: scheduledProvider }).catch((error: unknown) => {
+      console.error('[DREAM_WORKER_ERROR]', error);
+    });
+  }, DREAM_PROCESSING_CONFIG.PROCESSING_DELAY_MS);
+}
+
+export async function processDream(
   dreamId: string,
-  options?: { completionDelayMs?: number },
+  options: ProcessDreamOptions = {},
 ): Promise<void> {
-  const completionDelayMs = options?.completionDelayMs ?? COMPLETION_DELAY_MS;
+  const completionDelayMs = options.completionDelayMs ?? DREAM_PROCESSING_CONFIG.COMPLETION_DELAY_MS;
+  const provider = options.provider ?? defaultProvider;
   const now = new Date();
   const [processingDream] = await db
     .update(dreams)
@@ -72,10 +86,14 @@ export async function processMockDream(
       userId: dreams.userId,
       content: dreams.content,
       status: dreams.status,
+      interpreterId: interpreters.id,
       interpreterName: interpreters.name,
+      interpreterSystemPrompt: interpreters.systemPrompt,
+      openrouterModelId: aiModels.openrouterModelId,
     })
     .from(dreams)
     .innerJoin(interpreters, eq(dreams.interpreterId, interpreters.id))
+    .innerJoin(aiModels, eq(interpreters.modelId, aiModels.id))
     .where(eq(dreams.id, dreamId))
     .limit(1);
 
@@ -83,7 +101,37 @@ export async function processMockDream(
     return;
   }
 
-  if (dream.content.includes(MOCK_FAIL_TAG)) {
+  try {
+    const result = await provider.interpret({
+      dreamId: dream.id,
+      userId: dream.userId,
+      content: dream.content,
+      interpreter: {
+        id: dream.interpreterId,
+        name: dream.interpreterName,
+        systemPrompt: dream.interpreterSystemPrompt,
+      },
+      model: {
+        openrouterModelId: dream.openrouterModelId,
+      },
+    });
+    const interpretation = sanitizeInterpretation(result.interpretation);
+
+    if (!interpretation) {
+      throw new Error('Dream interpretation provider returned empty content.');
+    }
+
+    await db
+      .update(dreams)
+      .set({
+        status: DREAM_STATUS.COMPLETED,
+        interpretation,
+        updatedAt: new Date(),
+      })
+      .where(and(eq(dreams.id, dreamId), eq(dreams.status, DREAM_STATUS.PROCESSING)));
+  } catch (error) {
+    console.error('[DREAM_PROVIDER_ERROR]', error);
+
     const [failedDream] = await db
       .update(dreams)
       .set({ status: DREAM_STATUS.FAILED, updatedAt: new Date() })
@@ -93,18 +141,7 @@ export async function processMockDream(
     if (failedDream) {
       await refundDreamCredit(dream.userId, dreamId);
     }
-
-    return;
   }
-
-  await db
-    .update(dreams)
-    .set({
-      status: DREAM_STATUS.COMPLETED,
-      interpretation: buildMockInterpretation(dream.content, dream.interpreterName),
-      updatedAt: new Date(),
-    })
-    .where(and(eq(dreams.id, dreamId), eq(dreams.status, DREAM_STATUS.PROCESSING)));
 }
 
 async function refundDreamCredit(userId: string, dreamId: string): Promise<void> {

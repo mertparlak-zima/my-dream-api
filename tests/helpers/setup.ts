@@ -20,3 +20,11 @@ process.env.NODE_ENV = 'development';
 process.env.DEV_AUTH_ENABLED = process.env.DEV_AUTH_ENABLED ?? 'true';
 process.env.TEST_DATABASE_URL = fallbackDatabaseUrl;
 process.env.DATABASE_URL = fallbackDatabaseUrl;
+
+const { configureDreamProcessingProvider } = await import('../../src/features/dreams/dreams.processor');
+
+configureDreamProcessingProvider({
+  async interpret(request) {
+    return { interpretation: `vitest: scheduled interpretation for ${request.dreamId}` };
+  },
+});

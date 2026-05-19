@@ -14,7 +14,7 @@ import { ValidationError } from '../../errors/ValidationError';
 import { creditTransactions } from '../credits/credits.schema';
 import { interpreters } from '../interpreters/interpreters.schema';
 import { users } from '../users/users.schema';
-import { scheduleMockDreamProcessing } from './dreams.processor';
+import { scheduleDreamProcessing } from './dreams.processor';
 import { dreams } from './dreams.schema';
 import type { CreateDreamInput, ListDreamsQuery, SubmitDreamFeedbackInput } from './dreams.schemas';
 
@@ -222,7 +222,7 @@ export const dreamsService = {
       };
     });
 
-    scheduleMockDreamProcessing(dream.id);
+    scheduleDreamProcessing(dream.id);
 
     return serializeDream(dream);
   },

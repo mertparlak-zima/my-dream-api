@@ -93,9 +93,15 @@ Production does not accept `X-Dev-User-Id`; use `Authorization: Bearer <supabase
 ## Mock Policy
 
 - `X-Dev-User-Id` is development/test only and must fail closed in production.
-- Mock processors, mock models and fixtures do not belong in production runtime paths.
+- Mock processors and fixtures do not belong in production runtime paths.
 - Production requires real auth config and real external-service config instead of mock fallbacks.
 - Canonical inventory and allowlist/denylist: [`../../../project-docs/my-dream/my-dream-api/technical-infrastructure.md`](../../../project-docs/my-dream/my-dream-api/technical-infrastructure.md).
+
+## Dream Processing
+
+`POST /dreams` creates a `PENDING` dream, spends credit, returns `202`, and schedules background AI processing. Production processing uses the `DreamInterpretationProvider` boundary with OpenRouter chat completions. Tests inject deterministic providers for success/failure; production content tags are not used for failure simulation.
+
+OpenRouter uses the selected interpreter `system_prompt`, the linked model `openrouter_model_id`, timeout/retry settings from config, and sanitizes provider output before storing the interpretation. Provider failure marks the dream `FAILED` and preserves credit refund behavior.
 
 ## Production Env Contract
 

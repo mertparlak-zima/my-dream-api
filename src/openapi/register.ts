@@ -354,7 +354,7 @@ const routes: RouteConfig[] = [
     },
     responses: {
       202: {
-        description: 'Dream accepted and queued for mock processing.',
+        description: 'Dream accepted and queued for AI processing.',
         content: {
           'application/json': {
             schema: DreamEnvelopeSchema,

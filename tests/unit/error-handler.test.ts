@@ -24,18 +24,40 @@ async function parseResponse(response: Response) {
 }
 
 async function invokeProductionHandler(error: Error) {
-  const previousNodeEnv = process.env.NODE_ENV;
+  const previousEnv = {
+    NODE_ENV: process.env.NODE_ENV,
+    SUPABASE_URL: process.env.SUPABASE_URL,
+    OPENROUTER_API_KEY: process.env.OPENROUTER_API_KEY,
+    CORS_ALLOWED_ORIGINS: process.env.CORS_ALLOWED_ORIGINS,
+    RATE_LIMIT_WINDOW_MS: process.env.RATE_LIMIT_WINDOW_MS,
+    RATE_LIMIT_MAX_REQUESTS: process.env.RATE_LIMIT_MAX_REQUESTS,
+    DEV_AUTH_ENABLED: process.env.DEV_AUTH_ENABLED,
+  };
 
   vi.resetModules();
   process.env.NODE_ENV = 'production';
+  process.env.SUPABASE_URL = 'https://project.supabase.co';
+  process.env.OPENROUTER_API_KEY = 'openrouter-key';
+  process.env.CORS_ALLOWED_ORIGINS = 'https://mydream.app';
+  process.env.RATE_LIMIT_WINDOW_MS = '60000';
+  process.env.RATE_LIMIT_MAX_REQUESTS = '120';
+  process.env.DEV_AUTH_ENABLED = 'false';
 
-  const { errorHandler: productionErrorHandler } = await import('../../src/middlewares/errorHandler');
-  const response = productionErrorHandler(error, createContext());
-  const json = await parseResponse(response);
+  try {
+    const { errorHandler: productionErrorHandler } = await import('../../src/middlewares/errorHandler');
+    const response = productionErrorHandler(error, createContext());
+    const json = await parseResponse(response);
 
-  process.env.NODE_ENV = previousNodeEnv;
-
-  return { response, json };
+    return { response, json };
+  } finally {
+    for (const [key, value] of Object.entries(previousEnv)) {
+      if (value === undefined) {
+        delete process.env[key];
+      } else {
+        process.env[key] = value;
+      }
+    }
+  }
 }
 
 describe('errorHandler', () => {

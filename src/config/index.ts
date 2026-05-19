@@ -8,7 +8,7 @@ export const runtimeEnv = parseRuntimeEnv();
 export const RETRY_CONFIG = {
   MAX_COUNT: 3,
   BACKOFF_BASE: 1000,
-  STATUS_CODES: [429, 500, 502, 503],
+  STATUS_CODES: [408, 429, 500, 502, 503],
 } as const;
 
 export const PORT = runtimeEnv.PORT;
@@ -40,6 +40,16 @@ export const DREAM_CONFIG = {
   MAX_FEEDBACK_LENGTH: 1000,
   MIN_RATING: 0,
   MAX_RATING: 10,
+} as const;
+
+export const DREAM_PROCESSING_CONFIG = {
+  PROCESSING_DELAY_MS: 300,
+  COMPLETION_DELAY_MS: 0,
+  PROVIDER_TIMEOUT_MS: 30_000,
+  MAX_INTERPRETATION_LENGTH: 12_000,
+  OPENROUTER_CHAT_COMPLETIONS_URL: 'https://openrouter.ai/api/v1/chat/completions',
+  OPENROUTER_TEMPERATURE: 0.7,
+  OPENROUTER_MAX_TOKENS: 1_200,
 } as const;
 
 export const PLAN_LIMITS: Record<Plan, number> = {

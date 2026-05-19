@@ -1,5 +1,5 @@
 import { eq } from 'drizzle-orm';
-import { PLAN_LIMITS } from '../../src/config';
+import { DREAM_PROCESSING_CONFIG, PLAN_LIMITS } from '../../src/config';
 import { CREDIT_TRANSACTION_TYPE, DREAM_STATUS, PLAN } from '../../src/constants/domain';
 import { CreditError } from '../../src/errors/CreditError';
 import { ForbiddenError } from '../../src/errors/ForbiddenError';
@@ -7,16 +7,21 @@ import { NotFoundError } from '../../src/errors/NotFoundError';
 import { ValidationError } from '../../src/errors/ValidationError';
 import { db } from '../../src/db';
 import { creditTransactions, dreams, users } from '../../src/db/schema';
+import { processDream } from '../../src/features/dreams/dreams.processor';
 import { dreamsService } from '../../src/features/dreams/dreams.service';
 import {
   createDreamFixture,
   createInterpreterFixture,
+  createModelFixture,
   createUserFixture,
   resetFixtures,
 } from '../helpers/fixtures';
 import { testDb } from '../helpers/db';
 import {
+  createTestDreamProvider,
+  failDreamImmediately,
   processDreamImmediately,
+  processDreamWithProvider,
   processDreamWithDelay,
   scheduleDreamProcessing,
 } from '../helpers/dreamsProcessing';
@@ -450,12 +455,20 @@ describe('dreamsService credit behavior', () => {
     ).rejects.toBeInstanceOf(ValidationError);
   });
 
-  it('completes delayed mock processing and truncates long interpretation excerpts', async () => {
+  it('completes delayed provider processing and sanitizes long interpretations', async () => {
     const user = await createUserFixture({ plan: PLAN.PRO, weeklyDreamCount: 0, extraCredits: 1 });
+    const model = await createModelFixture({ openrouterModelId: 'vitest/openrouter-model' });
     const interpreter = await createInterpreterFixture({
-      name: 'vitest: scheduler interpreter',
+      modelId: model.id,
+      name: 'vitest: provider interpreter',
+      systemPrompt: 'vitest: provider system prompt',
     });
     const longContent = `  ${'moonlight '.repeat(30)}${'echo '.repeat(20)}  `;
+    const requests: unknown[] = [];
+    const provider = createTestDreamProvider({
+      interpretation: `\u0000line one\r\n\r\n\r\n${'x'.repeat(DREAM_PROCESSING_CONFIG.MAX_INTERPRETATION_LENGTH + 10)}`,
+      onRequest: (request) => requests.push(request),
+    });
 
     const dream = await createDreamFixture({
       userId: user.id,
@@ -464,51 +477,99 @@ describe('dreamsService credit behavior', () => {
       status: DREAM_STATUS.PENDING,
     });
 
-    const processingPromise = processDreamWithDelay(dream.id, 25);
+    const processingPromise = processDreamWithProvider(dream.id, provider, 25);
     await waitForDreamStatus(dream.id, DREAM_STATUS.PROCESSING, 1000);
     await processingPromise;
 
     const storedDream = await waitForDreamStatus(dream.id, DREAM_STATUS.COMPLETED, 1000);
 
-    const normalizedContent = longContent.replace(/\s+/g, ' ').trim();
-    const excerpt = `${normalizedContent.slice(0, 220)}...`;
-
-    expect(storedDream.interpretation).toContain('vitest: scheduler interpreter yorumu');
-    expect(storedDream.interpretation).toContain(`Ana iz: "${excerpt}"`);
-    expect(storedDream.interpretation).not.toContain(normalizedContent);
+    expect(requests).toHaveLength(1);
+    expect(requests[0]).toMatchObject({
+      dreamId: dream.id,
+      userId: user.id,
+      content: longContent,
+      interpreter: {
+        id: interpreter.id,
+        name: 'vitest: provider interpreter',
+        systemPrompt: 'vitest: provider system prompt',
+      },
+      model: {
+        openrouterModelId: 'vitest/openrouter-model',
+      },
+    });
+    expect(storedDream.interpretation).not.toContain('\u0000');
+    expect(storedDream.interpretation).not.toContain('\r\n');
+    expect(storedDream.interpretation).not.toContain('\n\n\n');
+    expect(storedDream.interpretation?.length).toBeLessThanOrEqual(
+      DREAM_PROCESSING_CONFIG.MAX_INTERPRETATION_LENGTH,
+    );
   }, 10000);
 
-  it('completes delayed mock processing without truncating short content excerpts', async () => {
+  it('stores provider interpretation without generating production mock text', async () => {
     const user = await createUserFixture();
     const interpreter = await createInterpreterFixture({
       name: 'vitest: short interpreter',
     });
-    const shortContent = '  vitest: short symbolic river dream  ';
+    const interpretation = 'vitest: provider generated interpretation';
     const dream = await createDreamFixture({
       userId: user.id,
       interpreterId: interpreter.id,
-      content: shortContent,
+      content: 'vitest: short symbolic river dream',
       status: DREAM_STATUS.PENDING,
     });
 
-    await processDreamWithDelay(dream.id, 1);
+    await processDreamWithProvider(
+      dream.id,
+      createTestDreamProvider({ interpretation }),
+    );
 
     const storedDream = await waitForDreamStatus(dream.id, DREAM_STATUS.COMPLETED, 1000);
-    const normalizedContent = shortContent.replace(/\s+/g, ' ').trim();
 
-    expect(storedDream.interpretation).toContain(`Ana iz: "${normalizedContent}"`);
+    expect(storedDream.interpretation).toBe(interpretation);
   });
 
-  it('marks [mock-fail] dreams as FAILED and keeps a single REFUNDED transaction even on duplicate refund attempts', async () => {
+  it('marks sanitized empty provider output as FAILED and refunds spent credit', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
     const user = await createUserFixture({ plan: PLAN.FREE, weeklyDreamCount: 0, extraCredits: 0 });
     const interpreter = await createInterpreterFixture();
 
     const response = await dreamsService.createDream(user.id, {
-      content: 'vitest: [mock-fail] refund this dream please',
+      content: 'vitest: provider returns empty output',
       interpreter_id: interpreter.id,
     });
 
-    await processDreamImmediately(response.id);
+    await processDreamWithProvider(
+      response.id,
+      createTestDreamProvider({ interpretation: ' \u0000 ' }),
+    );
+
+    const storedDream = await testDb.query.dreams.findFirst({
+      where: eq(dreams.id, response.id),
+      columns: { status: true, interpretation: true },
+    });
+    expect(storedDream).toEqual({
+      status: DREAM_STATUS.FAILED,
+      interpretation: null,
+    });
+
+    const transactions = await getDreamTransactions(response.id);
+    expect(transactions.map((transaction) => transaction.transactionType)).toEqual([
+      CREDIT_TRANSACTION_TYPE.USED_WEEKLY,
+      CREDIT_TRANSACTION_TYPE.REFUNDED,
+    ]);
+  });
+
+  it('marks provider failures as FAILED and keeps a single REFUNDED transaction even on duplicate attempts', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const user = await createUserFixture({ plan: PLAN.FREE, weeklyDreamCount: 0, extraCredits: 0 });
+    const interpreter = await createInterpreterFixture();
+
+    const response = await dreamsService.createDream(user.id, {
+      content: 'vitest: provider should fail and refund this dream',
+      interpreter_id: interpreter.id,
+    });
+
+    await failDreamImmediately(response.id);
 
     const failedDream = await testDb.query.dreams.findFirst({
       where: eq(dreams.id, response.id),
@@ -520,7 +581,7 @@ describe('dreamsService credit behavior', () => {
       .update(dreams)
       .set({ status: DREAM_STATUS.PENDING, updatedAt: new Date() })
       .where(eq(dreams.id, response.id));
-    await processDreamImmediately(response.id);
+    await failDreamImmediately(response.id);
 
     const transactions = await getDreamTransactions(response.id);
     expect(transactions.map((transaction) => transaction.transactionType)).toEqual([
@@ -530,6 +591,7 @@ describe('dreamsService credit behavior', () => {
   });
 
   it('refunds restore the correct credit source for weekly and extra spends', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
     const interpreter = await createInterpreterFixture();
     const weeklyUser = await createUserFixture({ plan: PLAN.FREE, weeklyDreamCount: 0, extraCredits: 0 });
     const extraUser = await createUserFixture({
@@ -539,16 +601,16 @@ describe('dreamsService credit behavior', () => {
     });
 
     const weeklyDream = await dreamsService.createDream(weeklyUser.id, {
-      content: 'vitest: [mock-fail] weekly refund source check',
+      content: 'vitest: weekly refund source check',
       interpreter_id: interpreter.id,
     });
     const extraDream = await dreamsService.createDream(extraUser.id, {
-      content: 'vitest: [mock-fail] extra refund source check',
+      content: 'vitest: extra refund source check',
       interpreter_id: interpreter.id,
     });
 
-    await processDreamImmediately(weeklyDream.id);
-    await processDreamImmediately(extraDream.id);
+    await failDreamImmediately(weeklyDream.id);
+    await failDreamImmediately(extraDream.id);
 
     const weeklyCredits = await getUserCredits(weeklyUser.id);
     expect(weeklyCredits.weeklyDreamCount).toBe(0);
@@ -559,17 +621,18 @@ describe('dreamsService credit behavior', () => {
     expect(extraCredits.extraCredits).toBe(2);
   });
 
-  it('marks [mock-fail] fixture dreams as FAILED without refund when no spend transaction exists', async () => {
+  it('marks provider failures as FAILED without refund when no spend transaction exists', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
     const user = await createUserFixture({ plan: PLAN.FREE, weeklyDreamCount: 0, extraCredits: 2 });
     const interpreter = await createInterpreterFixture();
     const dream = await createDreamFixture({
       userId: user.id,
       interpreterId: interpreter.id,
-      content: 'vitest: [mock-fail] fixture dream without spend transaction',
+      content: 'vitest: fixture dream without spend transaction',
       status: DREAM_STATUS.PENDING,
     });
 
-    await processDreamImmediately(dream.id);
+    await failDreamImmediately(dream.id);
 
     const storedDream = await testDb.query.dreams.findFirst({
       where: eq(dreams.id, dream.id),
@@ -583,7 +646,8 @@ describe('dreamsService credit behavior', () => {
     expect(updatedUser.extraCredits).toBe(2);
   });
 
-  it('returns early when mock processing cannot claim a pending dream or the dream leaves PROCESSING before completion', async () => {
+  it('returns early when processing cannot claim a pending dream or the dream leaves PROCESSING before completion', async () => {
+    await expect(processDream(crypto.randomUUID())).resolves.toBeUndefined();
     await expect(processDreamImmediately(crypto.randomUUID())).resolves.toBeUndefined();
 
     const user = await createUserFixture();
@@ -643,7 +707,7 @@ describe('dreamsService credit behavior', () => {
     });
   });
 
-  it('logs background worker errors when scheduled mock processing rejects', async () => {
+  it('logs background worker errors when scheduled processing rejects', async () => {
     vi.useFakeTimers();
 
     const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
@@ -655,7 +719,7 @@ describe('dreamsService credit behavior', () => {
     await vi.advanceTimersByTimeAsync(300);
 
     expect(consoleErrorSpy).toHaveBeenCalledWith(
-      '[DREAM_MOCK_WORKER_ERROR]',
+      '[DREAM_WORKER_ERROR]',
       expect.objectContaining({ message: 'vitest: scheduled processing failed' }),
     );
   });
