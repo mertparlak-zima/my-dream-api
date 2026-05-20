@@ -10,6 +10,9 @@ import { usersRoutes } from './features/users/users.controller';
 import { errorHandler } from './middlewares/errorHandler';
 import { createRateLimitMiddleware } from './middlewares/rateLimitMiddleware';
 import { registerOpenApi } from './openapi/register';
+import { captureDebugSentryEvent, initSentry, isSentryEnabled } from './utils/sentry';
+
+await initSentry();
 
 const app = new OpenAPIHono();
 
@@ -30,6 +33,19 @@ app.get('/', (c) => {
 app.get('/health', (c) => {
   return c.json({ success: true, status: 'ok' });
 });
+
+if (process.env.NODE_ENV !== 'production') {
+  app.get('/debug-sentry', async (c) => {
+    const { eventId, flushed } = await captureDebugSentryEvent(c);
+
+    return c.json({
+      success: true,
+      sentryEnabled: isSentryEnabled(),
+      eventId,
+      flushed,
+    });
+  });
+}
 
 registerOpenApi(app);
 

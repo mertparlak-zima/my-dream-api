@@ -27,6 +27,11 @@ const optionalPositiveInteger = z.preprocess(
   z.coerce.number().int().positive().optional(),
 );
 
+const optionalSampleRate = z.preprocess(
+  emptyToUndefined,
+  z.coerce.number().min(0).max(1).optional(),
+);
+
 const csvList = z.preprocess(
   (value) => {
     if (typeof value !== 'string') {
@@ -50,6 +55,10 @@ const rawEnvSchema = z.object({
   CORS_ALLOWED_ORIGINS: csvList,
   RATE_LIMIT_WINDOW_MS: optionalPositiveInteger,
   RATE_LIMIT_MAX_REQUESTS: optionalPositiveInteger,
+  SENTRY_DSN: optionalUrl,
+  SENTRY_ENVIRONMENT: optionalString,
+  SENTRY_RELEASE: optionalString,
+  SENTRY_TRACES_SAMPLE_RATE: optionalSampleRate,
   DEV_AUTH_ENABLED: z.preprocess(
     emptyToUndefined,
     z.enum(['true', 'false']).default('false').transform((value) => value === 'true'),
@@ -107,6 +116,8 @@ export type RuntimeEnv = z.infer<typeof productionEnvSchema> & {
   SUPABASE_JWT_ISSUER: string | undefined;
   RATE_LIMIT_WINDOW_MS: number;
   RATE_LIMIT_MAX_REQUESTS: number;
+  SENTRY_ENVIRONMENT: string;
+  SENTRY_TRACES_SAMPLE_RATE: number;
   DEV_AUTH_ENABLED: boolean;
 };
 
@@ -120,6 +131,8 @@ function deriveSupabaseAuthEnv(env: z.infer<typeof productionEnvSchema>): Runtim
       ?? (env.SUPABASE_URL ? `${env.SUPABASE_URL}/auth/v1` : undefined),
     RATE_LIMIT_WINDOW_MS: env.RATE_LIMIT_WINDOW_MS ?? 60_000,
     RATE_LIMIT_MAX_REQUESTS: env.RATE_LIMIT_MAX_REQUESTS ?? 120,
+    SENTRY_ENVIRONMENT: env.SENTRY_ENVIRONMENT ?? env.NODE_ENV,
+    SENTRY_TRACES_SAMPLE_RATE: env.SENTRY_TRACES_SAMPLE_RATE ?? (env.NODE_ENV === 'production' ? 0.1 : 1),
     DEV_AUTH_ENABLED: (env.NODE_ENV === 'development' || env.NODE_ENV === 'test') && env.DEV_AUTH_ENABLED,
   };
 }

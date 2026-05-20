@@ -2,6 +2,7 @@ import type { Context } from 'hono';
 import { ZodError } from 'zod';
 import { AppError } from '../errors/AppError';
 import { IS_DEV } from '../config';
+import { captureUnexpectedError } from '../utils/sentry';
 
 export function errorHandler(err: Error, c: Context): Response {
   if (err instanceof ZodError) {
@@ -32,6 +33,7 @@ export function errorHandler(err: Error, c: Context): Response {
   }
 
   console.error('[UNHANDLED_ERROR]', err);
+  captureUnexpectedError(err, c);
 
   return c.json(
     {

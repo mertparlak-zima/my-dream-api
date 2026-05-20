@@ -56,6 +56,9 @@ describe('runtime config', () => {
     expect(env.PORT).toBe(3000);
     expect(env.RATE_LIMIT_WINDOW_MS).toBe(60_000);
     expect(env.RATE_LIMIT_MAX_REQUESTS).toBe(120);
+    expect(env.SENTRY_DSN).toBeUndefined();
+    expect(env.SENTRY_ENVIRONMENT).toBe('development');
+    expect(env.SENTRY_TRACES_SAMPLE_RATE).toBe(1);
   });
 
   it('rejects missing production env values', async () => {
@@ -134,10 +137,38 @@ describe('runtime config', () => {
     expect(env.SUPABASE_URL).toBe('https://project.supabase.co');
     expect(env.SUPABASE_JWKS_URL).toBe('https://project.supabase.co/auth/v1/.well-known/jwks.json');
     expect(env.DEV_AUTH_ENABLED).toBe(false);
+    expect(env.SENTRY_ENVIRONMENT).toBe('production');
+    expect(env.SENTRY_TRACES_SAMPLE_RATE).toBe(0.1);
     expect(env.CORS_ALLOWED_ORIGINS).toEqual([
       'https://app.mydream.local',
       'https://admin.mydream.local',
     ]);
+  });
+
+  it('accepts optional Sentry env values without making DSN required', async () => {
+    const env = await parseEnv({
+      NODE_ENV: 'development',
+      SENTRY_DSN: 'https://examplePublicKey@o0.ingest.sentry.io/0',
+      SENTRY_ENVIRONMENT: 'local',
+      SENTRY_RELEASE: 'my-dream-api@1.0.0',
+      SENTRY_TRACES_SAMPLE_RATE: '0.25',
+    });
+
+    expect(env.SENTRY_DSN).toBe('https://examplePublicKey@o0.ingest.sentry.io/0');
+    expect(env.SENTRY_ENVIRONMENT).toBe('local');
+    expect(env.SENTRY_RELEASE).toBe('my-dream-api@1.0.0');
+    expect(env.SENTRY_TRACES_SAMPLE_RATE).toBe(0.25);
+  });
+
+  it('rejects invalid Sentry sample rates', async () => {
+    const { parseRuntimeEnv } = await loadEnvParser();
+
+    setEnv({
+      NODE_ENV: 'development',
+      SENTRY_TRACES_SAMPLE_RATE: '2',
+    });
+
+    expect(() => parseRuntimeEnv(process.env)).toThrow(/SENTRY_TRACES_SAMPLE_RATE/);
   });
 
   it('throws during config module import when runtime env is invalid', async () => {

@@ -116,6 +116,33 @@ Production startup validates required env before serving traffic. The single sou
 
 `DEV_AUTH_ENABLED=true` is rejected in production. Supabase JWKS can be overridden with `SUPABASE_JWKS_URL`; issuer can be overridden with `SUPABASE_JWT_ISSUER`.
 
+## Sentry
+
+This Bun + Hono API uses `@sentry/bun`. Sentry initializes only when `SENTRY_DSN` is set, so local development and tests keep working with an empty DSN.
+
+```env
+SENTRY_DSN=<api-sentry-dsn>
+SENTRY_ENVIRONMENT=production
+SENTRY_RELEASE=my-dream-api@<git-sha-or-version>
+SENTRY_TRACES_SAMPLE_RATE=0.1
+```
+
+`SENTRY_ENVIRONMENT` defaults to `NODE_ENV`. `SENTRY_TRACES_SAMPLE_RATE` accepts `0` through `1` and defaults to `1` outside production and `0.1` in production.
+
+Unexpected errors from the global Hono error handler are captured. Expected `AppError` responses and Zod validation errors are not captured by default. Captured events tag the HTTP method/path and authenticated user id when available; email is not sent.
+
+The Sentry scrubber redacts authorization headers, cookies, tokens, provider/API keys, DSNs, dream content, interpretations, feedback text, prompts, and provider messages before sending events. Keep request bodies and generated dream text out of manual Sentry extras.
+
+Development/test verification endpoint:
+
+```sh
+curl http://localhost:3000/debug-sentry
+```
+
+The endpoint is not registered when `NODE_ENV=production`. For production smoke testing, trigger a controlled non-`AppError` failure through an internal-only path or temporary deployment check, then remove it.
+
+TypeScript source maps are emitted by `tsconfig.json`, but Bun build output source maps are not uploaded here. Upload release source maps in CI with the Sentry CLI if stack traces need original TypeScript source context.
+
 ## Seed Safety
 
 Seed commands require an explicit mode:

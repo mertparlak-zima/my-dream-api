@@ -34,6 +34,13 @@ export const RATE_LIMIT_CONFIG = {
   MAX_REQUESTS: runtimeEnv.RATE_LIMIT_MAX_REQUESTS,
 } as const;
 
+export const SENTRY_CONFIG = {
+  DSN: runtimeEnv.SENTRY_DSN,
+  ENVIRONMENT: runtimeEnv.SENTRY_ENVIRONMENT,
+  RELEASE: runtimeEnv.SENTRY_RELEASE,
+  TRACES_SAMPLE_RATE: runtimeEnv.SENTRY_TRACES_SAMPLE_RATE,
+} as const;
+
 export const DREAM_CONFIG = {
   MIN_CONTENT_LENGTH: 10,
   MAX_CONTENT_LENGTH: 6000,
