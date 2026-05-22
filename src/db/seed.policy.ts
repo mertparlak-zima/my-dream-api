@@ -1,18 +1,10 @@
 import { z } from 'zod';
 
 const SEED_MODES = ['local'] as const;
+export const DEFAULT_SEED_OPENROUTER_MODEL_ID = 'baidu/cobuddy:free';
+export const DEFAULT_SEED_MODEL_NAME = `OpenRouter ${DEFAULT_SEED_OPENROUTER_MODEL_ID}`;
 
 const seedModeSchema = z.enum(SEED_MODES);
-const openRouterModelIdSchema = z
-  .string()
-  .trim()
-  .min(1, 'SEED_OPENROUTER_MODEL_ID must not be empty.')
-  .refine((value) => !value.toLowerCase().startsWith('mock/'), {
-    message: 'SEED_OPENROUTER_MODEL_ID must be a real OpenRouter model id, not mock/*.',
-  })
-  .refine((value) => value.includes('/'), {
-    message: 'SEED_OPENROUTER_MODEL_ID must use provider/model format.',
-  });
 
 export type SeedMode = (typeof SEED_MODES)[number];
 
@@ -53,21 +45,10 @@ function parseSeedMode(source: NodeJS.ProcessEnv): SeedMode {
 
 export function parseSeedPolicy(source: NodeJS.ProcessEnv = process.env): SeedPolicy {
   const mode = parseSeedMode(source);
-  const rawModelId = source.SEED_OPENROUTER_MODEL_ID ?? 'openai/gpt-5-nano';
-
-  if (!rawModelId) {
-    throw new Error('Invalid seed config:\n- SEED_OPENROUTER_MODEL_ID is required.');
-  }
-
-  const parsedModelId = openRouterModelIdSchema.safeParse(rawModelId);
-
-  if (!parsedModelId.success) {
-    throw formatSeedError(parsedModelId.error);
-  }
 
   return {
     mode,
-    openrouterModelId: parsedModelId.data,
-    modelName: source.SEED_MODEL_NAME?.trim() || `OpenRouter ${parsedModelId.data}`,
+    openrouterModelId: DEFAULT_SEED_OPENROUTER_MODEL_ID,
+    modelName: DEFAULT_SEED_MODEL_NAME,
   };
 }

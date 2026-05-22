@@ -6,13 +6,14 @@ import { ForbiddenError } from '../../src/errors/ForbiddenError';
 import { NotFoundError } from '../../src/errors/NotFoundError';
 import { ValidationError } from '../../src/errors/ValidationError';
 import { db } from '../../src/db';
+import { DEFAULT_SEED_OPENROUTER_MODEL_ID } from '../../src/db/seed.policy';
 import { creditTransactions, dreams, users } from '../../src/db/schema';
 import { processDream } from '../../src/features/dreams/dreams.processor';
 import { dreamsService } from '../../src/features/dreams/dreams.service';
 import {
   createDreamFixture,
   createInterpreterFixture,
-  createModelFixture,
+  createSmokeInterpreterFixture,
   createUserFixture,
   resetFixtures,
 } from '../helpers/fixtures';
@@ -457,9 +458,7 @@ describe('dreamsService credit behavior', () => {
 
   it('completes delayed provider processing and sanitizes long interpretations', async () => {
     const user = await createUserFixture({ plan: PLAN.PRO, weeklyDreamCount: 0, extraCredits: 1 });
-    const model = await createModelFixture({ openrouterModelId: 'vitest/openrouter-model' });
-    const interpreter = await createInterpreterFixture({
-      modelId: model.id,
+    const interpreter = await createSmokeInterpreterFixture({
       name: 'vitest: provider interpreter',
       systemPrompt: 'vitest: provider system prompt',
     });
@@ -494,7 +493,7 @@ describe('dreamsService credit behavior', () => {
         systemPrompt: 'vitest: provider system prompt',
       },
       model: {
-        openrouterModelId: 'vitest/openrouter-model',
+        openrouterModelId: DEFAULT_SEED_OPENROUTER_MODEL_ID,
       },
     });
     expect(storedDream.interpretation).not.toContain('\u0000');

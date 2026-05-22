@@ -1,4 +1,6 @@
+import { eq } from 'drizzle-orm';
 import { AUTH_PROVIDER, CREDIT_TRANSACTION_TYPE, DREAM_STATUS, PLAN } from '../../src/constants/domain';
+import { DEFAULT_SEED_OPENROUTER_MODEL_ID } from '../../src/db/seed.policy';
 import { getNextWeeklyResetDate } from '../../src/utils/date';
 import { aiModels, creditTransactions, dreams, interpreters, users } from '../../src/db/schema';
 import { cleanupTestData, ensureUserExists, markCreated, testDb } from './db';
@@ -6,6 +8,7 @@ import { cleanupTestData, ensureUserExists, markCreated, testDb } from './db';
 const TEST_EMAIL_PREFIX = 'vitest+';
 const TEST_TEXT_PREFIX = 'vitest:';
 const TEST_MODEL_PREFIX = 'vitest/';
+const SMOKE_MODEL_NAME = `Smoke OpenRouter ${DEFAULT_SEED_OPENROUTER_MODEL_ID}`;
 
 type UserFixtureInput = {
   id?: string;
@@ -111,6 +114,24 @@ export async function createModelFixture(input: ModelFixtureInput = {}) {
   return { id };
 }
 
+export async function createSmokeModelFixture(input: Omit<ModelFixtureInput, 'openrouterModelId'> = {}) {
+  const [existingModel] = await testDb
+    .select({ id: aiModels.id })
+    .from(aiModels)
+    .where(eq(aiModels.openrouterModelId, DEFAULT_SEED_OPENROUTER_MODEL_ID))
+    .limit(1);
+
+  if (existingModel) {
+    return { id: existingModel.id };
+  }
+
+  return createModelFixture({
+    ...input,
+    openrouterModelId: DEFAULT_SEED_OPENROUTER_MODEL_ID,
+    name: input.name ?? SMOKE_MODEL_NAME,
+  });
+}
+
 export async function createInterpreterFixture(input: InterpreterFixtureInput = {}) {
   const now = new Date();
   const modelId = input.modelId ?? (await createModelFixture()).id;
@@ -132,6 +153,17 @@ export async function createInterpreterFixture(input: InterpreterFixtureInput = 
   markCreated('interpreter', id);
 
   return { id, modelId };
+}
+
+export async function createSmokeInterpreterFixture(
+  input: Omit<InterpreterFixtureInput, 'modelId'> = {},
+) {
+  const model = await createSmokeModelFixture();
+
+  return createInterpreterFixture({
+    ...input,
+    modelId: model.id,
+  });
 }
 
 export async function createDreamFixture(input: DreamFixtureInput) {

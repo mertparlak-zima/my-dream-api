@@ -36,7 +36,7 @@ export function resolveTestDatabaseUrl(): string {
   );
 }
 
-export const testQueryClient = postgres(resolveTestDatabaseUrl());
+export const testQueryClient = postgres(resolveTestDatabaseUrl(), { prepare: false });
 export const testDb = drizzle(testQueryClient, { schema });
 
 export function markCreated(kind: CreatedRowKind, id: string): string {

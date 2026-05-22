@@ -1,4 +1,5 @@
 import { ExternalServiceError } from '../../src/errors/ExternalServiceError';
+import { DEFAULT_SEED_OPENROUTER_MODEL_ID } from '../../src/db/seed.policy';
 import { OpenRouterDreamInterpretationProvider } from '../../src/features/dreams/openrouter.provider';
 
 function createRequest() {
@@ -12,7 +13,7 @@ function createRequest() {
       systemPrompt: 'vitest system prompt',
     },
     model: {
-      openrouterModelId: 'openai/gpt-5-nano',
+      openrouterModelId: DEFAULT_SEED_OPENROUTER_MODEL_ID,
     },
   };
 }
@@ -59,7 +60,7 @@ describe('OpenRouterDreamInterpretationProvider', () => {
 
     const body = JSON.parse(String(init?.body));
     expect(body).toMatchObject({
-      model: 'openai/gpt-5-nano',
+      model: DEFAULT_SEED_OPENROUTER_MODEL_ID,
       max_tokens: expect.any(Number),
       temperature: expect.any(Number),
       user: 'user-id',

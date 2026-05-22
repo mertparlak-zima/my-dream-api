@@ -60,6 +60,8 @@ Use this connection string from the host machine:
 DATABASE_URL=postgres://mydream:mydream@localhost:5433/mydream
 ```
 
+For Supabase production, `DATABASE_URL` can use the Supabase Transaction pooler or direct Postgres URL. The API initializes `postgres-js` with `prepare: false`, because prepared statements are not supported in Supabase Transaction pool mode.
+
 The API container uses this internal Docker connection string:
 
 ```env
@@ -102,6 +104,8 @@ Production does not accept `X-Dev-User-Id`; use `Authorization: Bearer <supabase
 `POST /dreams` creates a `PENDING` dream, spends credit, returns `202`, and schedules background AI processing. Production processing uses the `DreamInterpretationProvider` boundary with OpenRouter chat completions. Tests inject deterministic providers for success/failure; production content tags are not used for failure simulation.
 
 OpenRouter uses the selected interpreter `system_prompt`, the linked model `openrouter_model_id`, timeout/retry settings from config, and sanitizes provider output before storing the interpretation. Provider failure marks the dream `FAILED` and preserves credit refund behavior.
+
+Local seed uses the code-owned smoke model, `baidu/cobuddy:free`, and links the canonical interpreter rows to that model. The model id/name are not env values; changing the canonical smoke model should be a code/docs change.
 
 ## Production Env Contract
 
@@ -151,9 +155,38 @@ Seed commands require an explicit mode:
 bun run db:seed:local
 ```
 
-Local seed creates the canonical model/interpreters plus the local dev user. Seeding is disabled when `NODE_ENV=production`; production data must not be bootstrapped from this repository. Local model config can use `SEED_OPENROUTER_MODEL_ID` and rejects `mock/*` model ids.
+Local seed creates the canonical `baidu/cobuddy:free` model/interpreters plus the local dev user. Seeding is disabled when `NODE_ENV=production`; production data must not be bootstrapped from this repository. The local model id/name are code-owned seed defaults, not env configuration.
+
+Real-network OpenRouter smoke is manual for now, not part of `bun run test`. With `OPENROUTER_API_KEY` set, run migration + seed, submit a dream through the normal API/app flow, then poll the dream until it reaches `COMPLETED` with a non-empty interpretation or `FAILED` with the credit refund preserved.
 
 Production deploys should run committed migrations with `bun run db:migrate`. Do not use `db:push` for production schema changes.
+
+## Production Database Migrations
+
+Supabase production project:
+
+| Field | Value |
+| :--- | :--- |
+| Project name | `my-dream-api` |
+| Project ref | `dyzhdqcurixsysirthkn` |
+| Region | `eu-west-1` |
+| Postgres | `17.6` |
+
+The GitHub workflow `.github/workflows/production-db-migrate.yml` runs on pushes to `main` when committed Drizzle migration files change. It installs dependencies, runs `bun run check`, and applies pending migrations with `bun run db:migrate`.
+
+Required GitHub configuration:
+
+- Environment: `production`
+- Secret: `PRODUCTION_DATABASE_URL`
+
+Use the Supabase production Postgres connection string for `PRODUCTION_DATABASE_URL`. Prefer a direct or session-mode connection for migrations when available, include SSL requirements from Supabase, and do not use this secret in app/client code. Runtime `DATABASE_URL` may use the Supabase Transaction pooler because prepared statements are disabled in the API DB client.
+
+Rules:
+
+- Remote schema changes go through committed files under `drizzle/`.
+- Do not run SQL manually in the Supabase SQL editor for app schema changes.
+- Do not run production seed from this repository.
+- `db:push` remains local development tooling only; production uses committed migrations.
 
 ## Useful Commands
 

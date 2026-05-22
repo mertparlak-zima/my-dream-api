@@ -7,5 +7,5 @@ if (!DATABASE_URL) {
   throw new Error('DATABASE_URL is required to initialize the database connection.');
 }
 
-export const queryClient = postgres(DATABASE_URL);
+export const queryClient = postgres(DATABASE_URL, { prepare: false });
 export const db = drizzle(queryClient, { schema });
