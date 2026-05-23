@@ -2,6 +2,7 @@ project_id = "my-dream-api"
 
 [auth]
 enabled = true
+# Native app callback stays on the custom scheme; physical Expo Go smoke uses the deployed API host separately.
 site_url = "mydream://auth/callback"
 additional_redirect_urls = [
   "mydream://auth/callback",

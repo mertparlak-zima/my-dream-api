@@ -202,6 +202,8 @@ Apple auth is enabled first for the Expo/iOS pilot. The initial native Client ID
 com.zimbabweblue.my-dream-app
 ```
 
+For Expo Go smoke testing from a physical iPhone, point the app API base URL at `https://mydreamapi.zimastack.com` once DNS/TLS/deploy binding is live, and keep the native callback on `mydream://auth/callback`.
+
 For Expo Go testing, `host.exp.Exponent` is also included in `supabase/config.toml`. For custom development builds, add every iOS bundle identifier that will call Supabase Apple auth.
 
 The Apple provider secret is referenced as `env(SUPABASE_AUTH_EXTERNAL_APPLE_SECRET)` and must not be committed. Native-only Sign in with Apple via Expo `AppleAuthentication` and `signInWithIdToken` does not use the web OAuth Services ID secret. Leave `SUPABASE_AUTH_EXTERNAL_APPLE_SECRET` empty until an OAuth/browser fallback is needed. If Supabase CLI refuses to push Apple provider config without a secret, configure the native Client IDs in the dashboard first and defer CLI-managed Apple OAuth settings until the Services ID/secret exists.
