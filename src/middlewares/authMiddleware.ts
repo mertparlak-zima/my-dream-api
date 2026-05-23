@@ -1,5 +1,5 @@
 import { createMiddleware } from 'hono/factory';
-import { createRemoteJWKSet, jwtVerify, type JWTPayload } from 'jose';
+import { createRemoteJWKSet, decodeProtectedHeader, jwtVerify, type JWTPayload } from 'jose';
 import { AuthError } from '../errors/AuthError';
 import {
   DEV_AUTH_ENABLED,
@@ -27,10 +27,15 @@ function getSubject(payload: JWTPayload): string {
   return payload.sub;
 }
 
+function isHmacToken(token: string): boolean {
+  const { alg } = decodeProtectedHeader(token);
+  return Boolean(alg?.startsWith('HS'));
+}
+
 async function verifyAuthToken(token: string): Promise<string> {
   const verifyOptions = SUPABASE_JWT_ISSUER ? { issuer: SUPABASE_JWT_ISSUER } : undefined;
 
-  if (JWT_SECRET) {
+  if (JWT_SECRET && isHmacToken(token)) {
     const secret = new TextEncoder().encode(JWT_SECRET);
     const { payload } = await jwtVerify(token, secret);
     return getSubject(payload);
@@ -63,7 +68,8 @@ export const authMiddleware = createMiddleware(async (c, next) => {
   }
 
   try {
-    c.set('userId', await verifyAuthToken(token));
+    const userId = await verifyAuthToken(token);
+    c.set('userId', userId);
     await next();
   } catch (error) {
     if (error instanceof AuthError) {

@@ -6,6 +6,8 @@ enabled = true
 site_url = "mydream://auth/callback"
 additional_redirect_urls = [
   "mydream://auth/callback",
+  "https://mydream.zimastack.com",
+  "https://mydream.zimastack.com/auth/callback",
 ]
 
 [auth.external.apple]

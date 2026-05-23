@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
-import { SignJWT } from 'jose';
+import { createServer } from 'node:http';
+import { generateKeyPair, exportJWK, SignJWT } from 'jose';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 const originalEnv = { ...process.env };
@@ -62,6 +63,36 @@ async function signTestJwt(userId: string, secret: string): Promise<string> {
     .setIssuedAt()
     .setExpirationTime('5m')
     .sign(new TextEncoder().encode(secret));
+}
+
+async function startJwksServer(publicKey: CryptoKey): Promise<{
+  close: () => Promise<void>;
+  jwksUrl: string;
+}> {
+  const jwk = await exportJWK(publicKey);
+  jwk.use = 'sig';
+  jwk.alg = 'ES256';
+  jwk.kid = 'test-es256-key';
+
+  const server = createServer((_, res) => {
+    res.setHeader('content-type', 'application/json');
+    res.end(JSON.stringify({ keys: [jwk] }));
+  });
+
+  await new Promise<void>((resolve) => {
+    server.listen(0, '127.0.0.1', resolve);
+  });
+
+  const address = server.address();
+  if (!address || typeof address === 'string') {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    throw new Error('Failed to start JWKS test server');
+  }
+
+  return {
+    jwksUrl: `http://127.0.0.1:${address.port}/.well-known/jwks.json`,
+    close: () => new Promise<void>((resolve) => server.close(() => resolve())),
+  };
 }
 
 describe('authMiddleware', () => {
@@ -174,5 +205,39 @@ describe('authMiddleware', () => {
 
     expect(response.status).toBe(200);
     expect(json).toEqual({ success: true, userId });
+  });
+
+  it('verifies Supabase ES256 tokens through JWKS even when a JWT secret exists', async () => {
+    const userId = crypto.randomUUID();
+    const { publicKey, privateKey } = await generateKeyPair('ES256');
+    const jwksServer = await startJwksServer(publicKey);
+
+    try {
+      const token = await new SignJWT({})
+        .setProtectedHeader({ alg: 'ES256', kid: 'test-es256-key' })
+        .setSubject(userId)
+        .setIssuer('https://project.supabase.co/auth/v1')
+        .setIssuedAt()
+        .setExpirationTime('5m')
+        .sign(privateKey);
+
+      const app = await createProtectedApp({
+        ...validProductionEnv,
+        JWT_SECRET: 'wrong-legacy-secret',
+        SUPABASE_URL: 'https://project.supabase.co',
+        SUPABASE_JWKS_URL: jwksServer.jwksUrl,
+        SUPABASE_JWT_ISSUER: 'https://project.supabase.co/auth/v1',
+      });
+
+      const response = await app.request('/protected', {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const json = await response.json();
+
+      expect(response.status).toBe(200);
+      expect(json).toEqual({ success: true, userId });
+    } finally {
+      await jwksServer.close();
+    }
   });
 });
