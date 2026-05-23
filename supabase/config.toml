@@ -1,0 +1,21 @@
+project_id = "my-dream-api"
+
+[auth]
+enabled = true
+site_url = "mydream://auth/callback"
+additional_redirect_urls = [
+  "mydream://auth/callback",
+]
+
+[auth.external.apple]
+enabled = true
+# Comma-separated native Client IDs accepted by Supabase for Apple id_token audience validation.
+# `host.exp.Exponent` is required only while testing through Expo Go.
+client_id = "com.zimbabweblue.my-dream-app,host.exp.Exponent"
+# Required only for Apple OAuth/browser fallback. Native Expo signInWithIdToken does not use this secret.
+secret = "env(SUPABASE_AUTH_EXTERNAL_APPLE_SECRET)"
+
+[auth.external.google]
+enabled = false
+client_id = ""
+secret = "env(SUPABASE_AUTH_EXTERNAL_GOOGLE_SECRET)"

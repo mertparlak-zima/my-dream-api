@@ -11,5 +11,8 @@ node_modules/
 dist/
 coverage/
 
+# supabase local cli state
+supabase/.temp/
+
 # os
 .DS_Store

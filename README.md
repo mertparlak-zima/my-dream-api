@@ -188,6 +188,26 @@ Rules:
 - Do not run production seed from this repository.
 - `db:push` remains local development tooling only; production uses committed migrations.
 
+## Supabase Auth Provider Config
+
+Supabase cloud auth config is managed from `supabase/config.toml` and can be pushed with:
+
+```sh
+supabase config push --project-ref dyzhdqcurixsysirthkn
+```
+
+Apple auth is enabled first for the Expo/iOS pilot. The initial native Client ID is:
+
+```text
+com.zimbabweblue.my-dream-app
+```
+
+For Expo Go testing, `host.exp.Exponent` is also included in `supabase/config.toml`. For custom development builds, add every iOS bundle identifier that will call Supabase Apple auth.
+
+The Apple provider secret is referenced as `env(SUPABASE_AUTH_EXTERNAL_APPLE_SECRET)` and must not be committed. Native-only Sign in with Apple via Expo `AppleAuthentication` and `signInWithIdToken` does not use the web OAuth Services ID secret. Leave `SUPABASE_AUTH_EXTERNAL_APPLE_SECRET` empty until an OAuth/browser fallback is needed. If Supabase CLI refuses to push Apple provider config without a secret, configure the native Client IDs in the dashboard first and defer CLI-managed Apple OAuth settings until the Services ID/secret exists.
+
+Google auth is present but disabled in `supabase/config.toml`; enable it only after Google credentials are ready.
+
 ## Useful Commands
 
 ```sh

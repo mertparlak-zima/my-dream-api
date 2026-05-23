@@ -9,6 +9,14 @@ import type { SyncUserInput } from './auth.schemas';
 export const authService = {
   async syncUser(userId: string, input: SyncUserInput): Promise<UserResponse> {
     const now = new Date();
+    const updateValues = {
+      email: input.email,
+      authProvider: input.auth_provider,
+      providerId: input.provider_id,
+      ...(input.first_name ? { firstName: input.first_name } : {}),
+      ...(input.last_name ? { lastName: input.last_name } : {}),
+      updatedAt: now,
+    };
 
     await db
       .insert(users)
@@ -17,21 +25,14 @@ export const authService = {
         email: input.email,
         authProvider: input.auth_provider,
         providerId: input.provider_id,
-        firstName: input.first_name,
-        lastName: input.last_name,
+        firstName: input.first_name ?? null,
+        lastName: input.last_name ?? null,
         limitResetDate: getNextWeeklyResetDate(now),
         updatedAt: now,
       })
       .onConflictDoUpdate({
         target: users.id,
-        set: {
-          email: input.email,
-          authProvider: input.auth_provider,
-          providerId: input.provider_id,
-          firstName: input.first_name,
-          lastName: input.last_name,
-          updatedAt: now,
-        },
+        set: updateValues,
       });
 
     const syncedUser = await db.query.users.findFirst({
