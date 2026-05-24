@@ -8,13 +8,8 @@ if (existsSync('.env')) {
   process.loadEnvFile?.('.env');
 }
 
-const fallbackDatabaseUrl = process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL;
-
-if (!fallbackDatabaseUrl) {
-  throw new Error(
-    'Set TEST_DATABASE_URL for API tests. In local development, DATABASE_URL may be used as a fallback.',
-  );
-}
+const fallbackDatabaseUrl =
+  process.env.TEST_DATABASE_URL?.trim() || 'postgres://mydream:mydream@localhost:5433/mydream';
 
 process.env.NODE_ENV = 'development';
 process.env.DEV_AUTH_ENABLED = process.env.DEV_AUTH_ENABLED ?? 'true';
