@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { DREAM_PROCESSING_CONFIG, OPENROUTER_API_KEY, RETRY_CONFIG } from '../../config';
 import { ExternalServiceError } from '../../errors/ExternalServiceError';
+import { addSentryBreadcrumb } from '../../utils/sentry';
 import type {
   DreamInterpretationProvider,
   DreamInterpretationRequest,
@@ -196,10 +197,22 @@ export class OpenRouterDreamInterpretationProvider implements DreamInterpretatio
           const providerError = await readProviderError(response);
 
           if (isRetryableStatus(response.status) && attempt < this.retryCount - 1) {
+            addSentryBreadcrumb('dream.provider', 'OpenRouter retry scheduled', {
+              attempt: attempt + 1,
+              dreamId: request.dreamId,
+              modelId: request.model.openrouterModelId,
+              status: response.status,
+            }, 'warning');
             await this.sleep(getRetryAfterMs(response) ?? this.retryBackoffBaseMs * 2 ** attempt);
             continue;
           }
 
+          addSentryBreadcrumb('dream.provider', 'OpenRouter request failed', {
+            attempt: attempt + 1,
+            dreamId: request.dreamId,
+            modelId: request.model.openrouterModelId,
+            status: response.status,
+          }, 'error');
           throw providerError;
         }
 
@@ -211,6 +224,12 @@ export class OpenRouterDreamInterpretationProvider implements DreamInterpretatio
           break;
         }
 
+        addSentryBreadcrumb('dream.provider', 'OpenRouter request error retry scheduled', {
+          attempt: attempt + 1,
+          dreamId: request.dreamId,
+          errorName: error instanceof Error ? error.name : 'UnknownError',
+          modelId: request.model.openrouterModelId,
+        }, 'warning');
         await this.sleep(this.retryBackoffBaseMs * 2 ** attempt);
       }
     }

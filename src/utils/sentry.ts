@@ -19,6 +19,12 @@ type SentryScope = {
 };
 
 type SentryClient = {
+  addBreadcrumb?(breadcrumb: {
+    category: string;
+    data?: Record<string, unknown>;
+    level?: 'debug' | 'error' | 'info' | 'warning';
+    message: string;
+  }): void;
   init(options: {
     dsn: string;
     environment: string;
@@ -78,6 +84,24 @@ export async function initSentry(): Promise<void> {
 
 export function isSentryEnabled(): boolean {
   return initialized;
+}
+
+export function addSentryBreadcrumb(
+  category: string,
+  message: string,
+  data: Record<string, unknown> = {},
+  level: 'debug' | 'error' | 'info' | 'warning' = 'info',
+): void {
+  if (!initialized || !sentryClient?.addBreadcrumb) {
+    return;
+  }
+
+  sentryClient.addBreadcrumb({
+    category,
+    data: scrubValue(data) as Record<string, unknown>,
+    level,
+    message,
+  });
 }
 
 export function captureUnexpectedError(error: Error, c: Context): string | undefined {
