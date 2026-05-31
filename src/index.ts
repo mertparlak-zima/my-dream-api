@@ -6,6 +6,7 @@ import { authRoutes } from './features/auth/auth.controller';
 import { creditsRoutes } from './features/credits/credits.controller';
 import { dreamsRoutes } from './features/dreams/dreams.controller';
 import { interpretersRoutes } from './features/interpreters/interpreters.controller';
+import { NotFoundError } from './errors/NotFoundError';
 import { usersRoutes } from './features/users/users.controller';
 import { errorHandler } from './middlewares/errorHandler';
 import { createRateLimitMiddleware } from './middlewares/rateLimitMiddleware';
@@ -17,6 +18,7 @@ await initSentry();
 const app = new OpenAPIHono();
 
 app.onError(errorHandler);
+app.notFound((c) => errorHandler(new NotFoundError(), c));
 
 app.use(
   '*',

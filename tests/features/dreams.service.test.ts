@@ -10,6 +10,7 @@ import { DEFAULT_SEED_OPENROUTER_MODEL_ID } from '../../src/db/seed.policy';
 import { creditTransactions, dreams, users } from '../../src/db/schema';
 import { processDream } from '../../src/features/dreams/dreams.processor';
 import { dreamsService } from '../../src/features/dreams/dreams.service';
+import { getNextWeeklyResetDate } from '../../src/utils/date';
 import {
   createDreamFixture,
   createInterpreterFixture,
@@ -33,6 +34,7 @@ async function getUserCredits(userId: string) {
     columns: {
       weeklyDreamCount: true,
       extraCredits: true,
+      limitResetDate: true,
     },
   });
 
@@ -221,6 +223,34 @@ describe('dreamsService credit behavior', () => {
         interpreter_id: interpreter.id,
       }),
     ).rejects.toBeInstanceOf(NotFoundError);
+  });
+
+  it('resets expired weekly credits before spend decisions and uses weekly credit', async () => {
+    const now = new Date();
+
+    const user = await createUserFixture({
+      plan: PLAN.FREE,
+      weeklyDreamCount: PLAN_LIMITS[PLAN.FREE],
+      extraCredits: 0,
+      limitResetDate: new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000),
+    });
+    const interpreter = await createInterpreterFixture();
+
+    const response = await dreamsService.createDream(user.id, {
+      content: 'vitest: expired reset should spend weekly credit',
+      interpreter_id: interpreter.id,
+    });
+
+    expect(response.status).toBe(DREAM_STATUS.PENDING);
+
+    const updatedUser = await getUserCredits(user.id);
+    expect(updatedUser.weeklyDreamCount).toBe(1);
+    expect(updatedUser.extraCredits).toBe(0);
+    expect(updatedUser.limitResetDate.toISOString()).toBe(getNextWeeklyResetDate(now).toISOString());
+
+    const transactions = await getDreamTransactions(response.id);
+    expect(transactions).toHaveLength(1);
+    expect(transactions[0]?.transactionType).toBe(CREDIT_TRANSACTION_TYPE.USED_WEEKLY);
   });
 
   it('returns a dream by id for the owning user and rejects missing dreams', async () => {
@@ -724,10 +754,13 @@ describe('dreamsService credit behavior', () => {
   });
 
   it('prevents concurrent submissions from overspending weekly credits', async () => {
+    const now = new Date();
+
     const user = await createUserFixture({
       plan: PLAN.FREE,
-      weeklyDreamCount: 0,
+      weeklyDreamCount: PLAN_LIMITS[PLAN.FREE],
       extraCredits: 0,
+      limitResetDate: new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000),
     });
     const interpreter = await createInterpreterFixture();
 
@@ -755,6 +788,7 @@ describe('dreamsService credit behavior', () => {
     const updatedUser = await getUserCredits(user.id);
     expect(updatedUser.weeklyDreamCount).toBe(1);
     expect(updatedUser.extraCredits).toBe(0);
+    expect(updatedUser.limitResetDate.toISOString()).toBe(getNextWeeklyResetDate(now).toISOString());
     expect(await getUserDreams(user.id)).toHaveLength(1);
 
     const [createdDream] = await getUserDreams(user.id);

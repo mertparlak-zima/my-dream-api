@@ -1,4 +1,4 @@
-import { and, desc, eq, sql } from 'drizzle-orm';
+import { and, desc, eq, lte, sql } from 'drizzle-orm';
 import { PLAN_LIMITS } from '../../config';
 import {
   CREDIT_TRANSACTION_TYPE,
@@ -11,6 +11,7 @@ import { CreditError } from '../../errors/CreditError';
 import { ForbiddenError } from '../../errors/ForbiddenError';
 import { NotFoundError } from '../../errors/NotFoundError';
 import { ValidationError } from '../../errors/ValidationError';
+import { getNextWeeklyResetDate } from '../../utils/date';
 import { creditTransactions } from '../credits/credits.schema';
 import { interpreters } from '../interpreters/interpreters.schema';
 import { users } from '../users/users.schema';
@@ -156,6 +157,15 @@ export const dreamsService = {
       }
 
       const now = new Date();
+      await tx
+        .update(users)
+        .set({
+          weeklyDreamCount: 0,
+          limitResetDate: getNextWeeklyResetDate(now),
+          updatedAt: now,
+        })
+        .where(and(eq(users.id, userId), lte(users.limitResetDate, now)));
+
       const weeklyLimit = PLAN_LIMITS[user.plan];
       let spendType: SpendTransactionType;
 

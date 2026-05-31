@@ -19,6 +19,7 @@ type UserFixtureInput = {
   lastName?: string | null;
   plan?: (typeof PLAN)[keyof typeof PLAN];
   weeklyDreamCount?: number;
+  limitResetDate?: Date;
   extraCredits?: number;
 };
 
@@ -83,7 +84,7 @@ export async function createUserFixture(input: UserFixtureInput = {}) {
     lastName: input.lastName ?? 'User',
     plan: input.plan ?? PLAN.FREE,
     weeklyDreamCount: input.weeklyDreamCount ?? 0,
-    limitResetDate: getNextWeeklyResetDate(now),
+    limitResetDate: input.limitResetDate ?? getNextWeeklyResetDate(now),
     extraCredits: input.extraCredits ?? 0,
     updatedAt: now,
   });

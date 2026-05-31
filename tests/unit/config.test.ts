@@ -48,14 +48,10 @@ describe('runtime config', () => {
       SUPABASE_URL: undefined,
       OPENROUTER_API_KEY: undefined,
       CORS_ALLOWED_ORIGINS: undefined,
-      RATE_LIMIT_WINDOW_MS: undefined,
-      RATE_LIMIT_MAX_REQUESTS: undefined,
     });
 
     expect(env.NODE_ENV).toBe('development');
     expect(env.PORT).toBe(3000);
-    expect(env.RATE_LIMIT_WINDOW_MS).toBe(60_000);
-    expect(env.RATE_LIMIT_MAX_REQUESTS).toBe(120);
     expect(env.SENTRY_DSN).toBeUndefined();
     expect(env.SENTRY_ENVIRONMENT).toBe('development');
     expect(env.SENTRY_TRACES_SAMPLE_RATE).toBe(1);
@@ -70,8 +66,6 @@ describe('runtime config', () => {
       SUPABASE_URL: undefined,
       OPENROUTER_API_KEY: undefined,
       CORS_ALLOWED_ORIGINS: undefined,
-      RATE_LIMIT_WINDOW_MS: undefined,
-      RATE_LIMIT_MAX_REQUESTS: undefined,
       JWT_SECRET: undefined,
       DEV_AUTH_ENABLED: undefined,
     });
@@ -79,8 +73,6 @@ describe('runtime config', () => {
     expect(() => parseRuntimeEnv(process.env)).toThrow(/DATABASE_URL is required in production/);
     expect(() => parseRuntimeEnv(process.env)).toThrow(/SUPABASE_URL is required in production/);
     expect(() => parseRuntimeEnv(process.env)).toThrow(/OPENROUTER_API_KEY is required in production/);
-    expect(() => parseRuntimeEnv(process.env)).toThrow(/RATE_LIMIT_WINDOW_MS must be a positive integer/);
-    expect(() => parseRuntimeEnv(process.env)).toThrow(/RATE_LIMIT_MAX_REQUESTS must be a positive integer/);
   });
 
   it('rejects production dev auth and wildcard CORS', async () => {
@@ -92,33 +84,12 @@ describe('runtime config', () => {
       SUPABASE_URL: 'https://project.supabase.co',
       OPENROUTER_API_KEY: 'openrouter-key',
       CORS_ALLOWED_ORIGINS: '*',
-      RATE_LIMIT_WINDOW_MS: '60000',
-      RATE_LIMIT_MAX_REQUESTS: '120',
       JWT_SECRET: 'jwt-secret',
       DEV_AUTH_ENABLED: 'true',
     });
 
     expect(() => parseRuntimeEnv(process.env)).toThrow(/DEV_AUTH_ENABLED must not be true in production/);
     expect(() => parseRuntimeEnv(process.env)).toThrow(/CORS_ALLOWED_ORIGINS must list explicit origins/);
-  });
-
-  it('rejects invalid production rate limits', async () => {
-    const { parseRuntimeEnv } = await loadEnvParser();
-
-    setEnv({
-      NODE_ENV: 'production',
-      DATABASE_URL: 'postgres://mydream:mydream@localhost:5433/mydream',
-      SUPABASE_URL: 'https://project.supabase.co',
-      OPENROUTER_API_KEY: 'openrouter-key',
-      CORS_ALLOWED_ORIGINS: 'https://app.mydream.local',
-      RATE_LIMIT_WINDOW_MS: '0',
-      RATE_LIMIT_MAX_REQUESTS: 'abc',
-      JWT_SECRET: 'jwt-secret',
-      DEV_AUTH_ENABLED: 'false',
-    });
-
-    expect(() => parseRuntimeEnv(process.env)).toThrow(/RATE_LIMIT_WINDOW_MS/);
-    expect(() => parseRuntimeEnv(process.env)).toThrow(/RATE_LIMIT_MAX_REQUESTS/);
   });
 
   it('accepts explicit production env values and derives Supabase JWKS config', async () => {
@@ -128,8 +99,6 @@ describe('runtime config', () => {
       SUPABASE_URL: 'https://project.supabase.co/',
       OPENROUTER_API_KEY: 'openrouter-key',
       CORS_ALLOWED_ORIGINS: 'https://app.mydream.local,https://admin.mydream.local',
-      RATE_LIMIT_WINDOW_MS: '60000',
-      RATE_LIMIT_MAX_REQUESTS: '120',
       JWT_SECRET: undefined,
       DEV_AUTH_ENABLED: 'false',
     });

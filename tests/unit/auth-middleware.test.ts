@@ -14,8 +14,6 @@ const validProductionEnv: EnvOverride = {
   SUPABASE_URL: 'https://project.supabase.co',
   OPENROUTER_API_KEY: 'openrouter-key',
   CORS_ALLOWED_ORIGINS: 'https://app.mydream.local',
-  RATE_LIMIT_WINDOW_MS: '60000',
-  RATE_LIMIT_MAX_REQUESTS: '120',
 };
 
 function restoreEnv(): void {

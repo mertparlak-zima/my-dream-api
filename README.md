@@ -115,10 +115,11 @@ Production startup validates required env before serving traffic. The single sou
 - `SUPABASE_URL`
 - `OPENROUTER_API_KEY`
 - `CORS_ALLOWED_ORIGINS` with explicit origins, never `*`
-- `RATE_LIMIT_WINDOW_MS` and `RATE_LIMIT_MAX_REQUESTS` as positive integers
 - `JWT_SECRET` for legacy HS256 verification or Supabase JWKS config derived from `SUPABASE_URL`
 
 `DEV_AUTH_ENABLED=true` is rejected in production. Supabase JWKS can be overridden with `SUPABASE_JWKS_URL`; issuer can be overridden with `SUPABASE_JWT_ISSUER`.
+
+Rate limit window and max request values are code-owned constants in `src/config/index.ts` for now. Current values are 120 requests per 60 seconds.
 
 ## Sentry
 

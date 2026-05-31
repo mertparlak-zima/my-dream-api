@@ -30,8 +30,8 @@ export const CORS_CONFIG = {
 } as const;
 
 export const RATE_LIMIT_CONFIG = {
-  WINDOW_MS: runtimeEnv.RATE_LIMIT_WINDOW_MS,
-  MAX_REQUESTS: runtimeEnv.RATE_LIMIT_MAX_REQUESTS,
+  WINDOW_MS: 60_000,
+  MAX_REQUESTS: 120,
 } as const;
 
 export const SENTRY_CONFIG = {

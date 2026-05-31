@@ -97,6 +97,20 @@ describe('roadmap 0008 route contracts', () => {
     expect(body).toContain('My Dream API Reference');
   });
 
+  it('returns the JSON not-found envelope for unknown routes', async () => {
+    const response = await appRequest('/does-not-exist');
+    const json = await response.json();
+
+    expect(response.status).toBe(404);
+    expect(json).toEqual({
+      success: false,
+      error: {
+        code: 'NOT_FOUND',
+        message: 'Kaynak bulunamadı.',
+      },
+    });
+  });
+
   it('GET /credits/me without auth returns a 401 UNAUTHORIZED envelope', async () => {
     const { response, json } = await requestJson('/credits/me');
 
