@@ -581,6 +581,10 @@ describe('dreamsService credit behavior', () => {
       interpretation: null,
     });
 
+    const updatedUser = await getUserCredits(user.id);
+    expect(updatedUser.weeklyDreamCount).toBe(0);
+    expect(updatedUser.extraCredits).toBe(0);
+
     const transactions = await getDreamTransactions(response.id);
     expect(transactions.map((transaction) => transaction.transactionType)).toEqual([
       CREDIT_TRANSACTION_TYPE.USED_WEEKLY,
@@ -588,7 +592,52 @@ describe('dreamsService credit behavior', () => {
     ]);
   });
 
-  it('marks provider failures as FAILED and keeps a single REFUNDED transaction even on duplicate attempts', async () => {
+  it('retries a failed refund when the refund transaction fails once', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const user = await createUserFixture({ plan: PLAN.FREE, weeklyDreamCount: 0, extraCredits: 0 });
+    const interpreter = await createInterpreterFixture();
+
+    const response = await dreamsService.createDream(user.id, {
+      content: 'vitest: provider should fail and refund this dream',
+      interpreter_id: interpreter.id,
+    });
+
+    vi.spyOn(db, 'transaction').mockImplementationOnce(async () => {
+      throw new Error('vitest: refund transaction failed');
+    });
+
+    await expect(
+      processDreamWithProvider(
+        response.id,
+        createTestDreamProvider({ fail: true }),
+      ),
+    ).rejects.toThrow('vitest: refund transaction failed');
+
+    const failedDream = await testDb.query.dreams.findFirst({
+      where: eq(dreams.id, response.id),
+      columns: { status: true },
+    });
+    expect(failedDream?.status).toBe(DREAM_STATUS.FAILED);
+
+    const creditsAfterFailure = await getUserCredits(user.id);
+    expect(creditsAfterFailure.weeklyDreamCount).toBe(1);
+    expect(creditsAfterFailure.extraCredits).toBe(0);
+    expect(await getDreamTransactions(response.id)).toHaveLength(1);
+
+    await processDreamImmediately(response.id);
+
+    const creditsAfterRetry = await getUserCredits(user.id);
+    expect(creditsAfterRetry.weeklyDreamCount).toBe(0);
+    expect(creditsAfterRetry.extraCredits).toBe(0);
+
+    const transactions = await getDreamTransactions(response.id);
+    expect(transactions.map((transaction) => transaction.transactionType)).toEqual([
+      CREDIT_TRANSACTION_TYPE.USED_WEEKLY,
+      CREDIT_TRANSACTION_TYPE.REFUNDED,
+    ]);
+  });
+
+  it('keeps a single REFUNDED transaction when retrying a failed dream after refund success', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => undefined);
     const user = await createUserFixture({ plan: PLAN.FREE, weeklyDreamCount: 0, extraCredits: 0 });
     const interpreter = await createInterpreterFixture();
@@ -599,24 +648,17 @@ describe('dreamsService credit behavior', () => {
     });
 
     await failDreamImmediately(response.id);
-
-    const failedDream = await testDb.query.dreams.findFirst({
-      where: eq(dreams.id, response.id),
-      columns: { status: true },
-    });
-    expect(failedDream?.status).toBe(DREAM_STATUS.FAILED);
-
-    await testDb
-      .update(dreams)
-      .set({ status: DREAM_STATUS.PENDING, updatedAt: new Date() })
-      .where(eq(dreams.id, response.id));
-    await failDreamImmediately(response.id);
+    await processDreamImmediately(response.id);
 
     const transactions = await getDreamTransactions(response.id);
     expect(transactions.map((transaction) => transaction.transactionType)).toEqual([
       CREDIT_TRANSACTION_TYPE.USED_WEEKLY,
       CREDIT_TRANSACTION_TYPE.REFUNDED,
     ]);
+
+    const updatedUser = await getUserCredits(user.id);
+    expect(updatedUser.weeklyDreamCount).toBe(0);
+    expect(updatedUser.extraCredits).toBe(0);
   });
 
   it('refunds restore the correct credit source for weekly and extra spends', async () => {

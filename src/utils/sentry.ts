@@ -5,6 +5,7 @@ const REDACTED = '[Redacted]';
 
 const SENSITIVE_KEY_PATTERN = /authorization|cookie|set-cookie|token|secret|password|api[_-]?key|provider[_-]?key|openrouter|dsn/i;
 const PRIVATE_PAYLOAD_KEY_PATTERN = /^(content|interpretation|feedback|feedback_text|userFeedbackText|systemPrompt|prompt|messages)$/i;
+const SENSITIVE_TEXT_PATTERN = /authorization|bearer\s+[a-z0-9._-]+|provider response|openrouter api key|token/i;
 
 let initialized = false;
 let sentryClient: SentryClient | undefined;
@@ -38,11 +39,26 @@ type SentryClient = {
   withScope<T>(callback: (scope: SentryScope) => T): T;
 };
 
+export type DreamProcessingFailureClass = 'provider' | 'worker';
+
+export type DreamProcessingErrorContext = {
+  dreamId: string;
+  failureClass: DreamProcessingFailureClass;
+  modelId?: string;
+  provider?: string;
+  status?: number;
+  userId?: string;
+};
+
 function shouldRedactKey(key: string): boolean {
   return SENSITIVE_KEY_PATTERN.test(key) || PRIVATE_PAYLOAD_KEY_PATTERN.test(key);
 }
 
 function scrubValue(value: unknown): unknown {
+  if (typeof value === 'string') {
+    return SENSITIVE_TEXT_PATTERN.test(value) ? REDACTED : value;
+  }
+
   if (Array.isArray(value)) {
     return value.map((item) => scrubValue(item));
   }
@@ -125,6 +141,49 @@ export function captureUnexpectedError(error: Error, c: Context): string | undef
     if (typeof userId === 'string' && userId.length > 0) {
       scope.setUser({ id: userId });
     }
+
+    return client.captureException(error);
+  });
+}
+
+export function captureDreamProcessingError(
+  error: Error,
+  context: DreamProcessingErrorContext,
+): string | undefined {
+  if (!initialized || !sentryClient) {
+    return undefined;
+  }
+
+  const client = sentryClient;
+
+  return client.withScope((scope) => {
+    scope.setTag('dream.id', context.dreamId);
+    scope.setTag('dream.failure_class', context.failureClass);
+
+    if (context.provider) {
+      scope.setTag('dream.provider', context.provider);
+    }
+
+    if (context.modelId) {
+      scope.setTag('dream.model_id', context.modelId);
+    }
+
+    if (typeof context.status === 'number') {
+      scope.setTag('dream.status', String(context.status));
+    }
+
+    if (typeof context.userId === 'string' && context.userId.length > 0) {
+      scope.setUser({ id: context.userId });
+    }
+
+    scope.setContext('dream_processing', scrubValue({
+      dreamId: context.dreamId,
+      failureClass: context.failureClass,
+      modelId: context.modelId,
+      provider: context.provider,
+      status: context.status,
+      userId: context.userId,
+    }) as Record<string, unknown>);
 
     return client.captureException(error);
   });

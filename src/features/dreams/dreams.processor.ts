@@ -2,6 +2,8 @@ import { and, desc, eq, inArray, sql } from 'drizzle-orm';
 import { DREAM_PROCESSING_CONFIG } from '../../config';
 import { CREDIT_TRANSACTION_TYPE, DREAM_STATUS } from '../../constants/domain';
 import { db } from '../../db';
+import { AppError } from '../../errors/AppError';
+import { captureDreamProcessingError } from '../../utils/sentry';
 import { aiModels } from '../ai_models/models.schema';
 import { creditTransactions } from '../credits/credits.schema';
 import { interpreters } from '../interpreters/interpreters.schema';
@@ -55,6 +57,10 @@ export function scheduleDreamProcessing(dreamId: string): void {
   setTimeout(() => {
     void processDream(dreamId, { provider: scheduledProvider }).catch((error: unknown) => {
       console.error('[DREAM_WORKER_ERROR]', error);
+      captureDreamProcessingError(error instanceof Error ? error : new Error('Dream worker processing failed.'), {
+        dreamId,
+        failureClass: 'worker',
+      });
     });
   }, DREAM_PROCESSING_CONFIG.PROCESSING_DELAY_MS);
 }
@@ -73,6 +79,19 @@ export async function processDream(
     .returning({ id: dreams.id });
 
   if (!processingDream) {
+    const [existingDream] = await db
+      .select({
+        status: dreams.status,
+        userId: dreams.userId,
+      })
+      .from(dreams)
+      .where(eq(dreams.id, dreamId))
+      .limit(1);
+
+    if (existingDream?.status === DREAM_STATUS.FAILED) {
+      await refundDreamCredit(existingDream.userId, dreamId);
+    }
+
     return;
   }
 
@@ -131,15 +150,26 @@ export async function processDream(
       .where(and(eq(dreams.id, dreamId), eq(dreams.status, DREAM_STATUS.PROCESSING)));
   } catch (error) {
     console.error('[DREAM_PROVIDER_ERROR]', error);
+    captureDreamProcessingError(error instanceof Error ? error : new Error('Dream provider processing failed.'), {
+      dreamId: dream.id,
+      userId: dream.userId,
+      provider: 'openrouter',
+      modelId: dream.openrouterModelId,
+      failureClass: 'provider',
+      status: error instanceof AppError ? error.statusCode : undefined,
+    });
 
     const [failedDream] = await db
       .update(dreams)
-      .set({ status: DREAM_STATUS.FAILED, updatedAt: new Date() })
+      .set({
+        status: DREAM_STATUS.FAILED,
+        updatedAt: new Date(),
+      })
       .where(and(eq(dreams.id, dreamId), eq(dreams.status, DREAM_STATUS.PROCESSING)))
-      .returning({ id: dreams.id });
+      .returning({ id: dreams.id, userId: dreams.userId });
 
     if (failedDream) {
-      await refundDreamCredit(dream.userId, dreamId);
+      await refundDreamCredit(failedDream.userId, dreamId);
     }
   }
 }

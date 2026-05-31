@@ -85,7 +85,16 @@ describe('sentry utilities', () => {
         authorization: 'Bearer secret',
         content: 'vitest dream content',
         nested: { feedback_text: 'private feedback' },
+        providerError: 'provider response included token abc123',
         safe: 'kept',
+      },
+      exception: {
+        values: [
+          {
+            type: 'ExternalServiceError',
+            value: 'provider response included OpenRouter API key',
+          },
+        ],
       },
     });
 
@@ -94,7 +103,16 @@ describe('sentry utilities', () => {
         authorization: '[Redacted]',
         content: '[Redacted]',
         nested: { feedback_text: '[Redacted]' },
+        providerError: '[Redacted]',
         safe: 'kept',
+      },
+      exception: {
+        values: [
+          {
+            type: 'ExternalServiceError',
+            value: '[Redacted]',
+          },
+        ],
       },
     });
   });
@@ -138,6 +156,37 @@ describe('sentry utilities', () => {
       path: '/auth/sync',
     });
     expect(sentryMock.setUser).toHaveBeenCalledWith({ id: 'user-id' });
+    expect(sentryMock.captureException).toHaveBeenCalledWith(expect.any(Error));
+  });
+
+  it('captures dream processing errors with safe structured context', async () => {
+    const { captureDreamProcessingError, initSentry } = await import('../../src/utils/sentry');
+
+    await initSentry();
+    const eventId = captureDreamProcessingError(new Error('boom'), {
+      dreamId: 'dream-id',
+      failureClass: 'provider',
+      modelId: 'openrouter-model',
+      provider: 'openrouter',
+      status: 502,
+      userId: 'user-id',
+    });
+
+    expect(eventId).toBe('event-id');
+    expect(sentryMock.setTag).toHaveBeenCalledWith('dream.id', 'dream-id');
+    expect(sentryMock.setTag).toHaveBeenCalledWith('dream.failure_class', 'provider');
+    expect(sentryMock.setTag).toHaveBeenCalledWith('dream.provider', 'openrouter');
+    expect(sentryMock.setTag).toHaveBeenCalledWith('dream.model_id', 'openrouter-model');
+    expect(sentryMock.setTag).toHaveBeenCalledWith('dream.status', '502');
+    expect(sentryMock.setUser).toHaveBeenCalledWith({ id: 'user-id' });
+    expect(sentryMock.setContext).toHaveBeenCalledWith('dream_processing', {
+      dreamId: 'dream-id',
+      failureClass: 'provider',
+      modelId: 'openrouter-model',
+      provider: 'openrouter',
+      status: 502,
+      userId: 'user-id',
+    });
     expect(sentryMock.captureException).toHaveBeenCalledWith(expect.any(Error));
   });
 
