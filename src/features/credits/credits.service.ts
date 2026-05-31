@@ -29,13 +29,21 @@ export const creditsService = {
         })
         .where(and(eq(users.id, userId), lte(users.limitResetDate, now)));
 
-      const user = await tx.select().from(users).where(eq(users.id, userId)).limit(1);
+      const [currentUser] = await tx
+        .select({
+          plan: users.plan,
+          weeklyDreamCount: users.weeklyDreamCount,
+          extraCredits: users.extraCredits,
+          limitResetDate: users.limitResetDate,
+        })
+        .from(users)
+        .where(eq(users.id, userId))
+        .limit(1);
 
-      if (!user[0]) {
+      if (!currentUser) {
         throw new NotFoundError('Kullanici bulunamadi.');
       }
 
-      const currentUser = user[0];
       const weeklyLimit = PLAN_LIMITS[currentUser.plan];
 
       return {

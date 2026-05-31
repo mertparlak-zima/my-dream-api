@@ -1,4 +1,3 @@
-import { eq } from 'drizzle-orm';
 import { db } from '../../db';
 import { users } from '../users/users.schema';
 import { getNextWeeklyResetDate } from '../../utils/date';
@@ -20,7 +19,7 @@ export const authService = {
     };
 
     try {
-      await db
+      const [syncedUser] = await db
         .insert(users)
         .values({
           id: userId,
@@ -35,11 +34,8 @@ export const authService = {
         .onConflictDoUpdate({
           target: users.id,
           set: updateValues,
-        });
-
-      const syncedUser = await db.query.users.findFirst({
-        where: eq(users.id, userId),
-      });
+        })
+        .returning();
 
       if (!syncedUser) {
         throw new NotFoundError('Kullanici senkronize edilemedi.');

@@ -1,4 +1,4 @@
-import { and, desc, eq, lte, sql } from 'drizzle-orm';
+import { and, desc, eq, lte, lt, or, sql } from 'drizzle-orm';
 import { PLAN_LIMITS } from '../../config';
 import {
   CREDIT_TRANSACTION_TYPE,
@@ -29,20 +29,35 @@ type InterpreterSummary = {
   sortOrder: number;
 };
 
-export type DreamResponse = {
+type DreamBase = {
   id: string;
   content: string;
   status: DreamStatus;
   interpretation: string | null;
-  interpreter: InterpreterSummary | null;
-  mood: null;
-  rating: number | null;
-  feedback: string | null;
   createdAt: string;
   updatedAt: string;
 };
 
-type DreamSelectRow = {
+export type DreamResponse = DreamBase & {
+  interpreter: InterpreterSummary | null;
+  mood: null;
+  rating: number | null;
+  feedback: string | null;
+};
+
+export type DreamListItem = {
+  id: string;
+  content: string;
+  status: DreamStatus;
+  createdAt: string;
+};
+
+export type DreamListResponse = {
+  items: DreamListItem[];
+  nextCursor: string | null;
+};
+
+type DreamDetailRow = {
   id: string;
   content: string;
   status: DreamStatus;
@@ -59,9 +74,21 @@ type DreamSelectRow = {
   interpreterSortOrder: number;
 };
 
+type DreamListRow = {
+  id: string;
+  content: string;
+  status: DreamStatus;
+  createdAt: Date;
+};
+
+type DreamCursor = {
+  createdAt: Date;
+  id: string;
+};
+
 type SpendTransactionType = typeof CREDIT_TRANSACTION_TYPE.USED_WEEKLY | typeof CREDIT_TRANSACTION_TYPE.USED_EXTRA;
 
-function serializeDream(row: DreamSelectRow): DreamResponse {
+function serializeDream(row: DreamDetailRow): DreamResponse {
   return {
     id: row.id,
     content: row.content,
@@ -84,7 +111,16 @@ function serializeDream(row: DreamSelectRow): DreamResponse {
   };
 }
 
-function dreamSelectFields(): {
+function serializeDreamListItem(row: DreamListRow): DreamListItem {
+  return {
+    id: row.id,
+    content: row.content,
+    status: row.status,
+    createdAt: row.createdAt.toISOString(),
+  };
+}
+
+function dreamDetailSelectFields(): {
   id: typeof dreams.id;
   content: typeof dreams.content;
   status: typeof dreams.status;
@@ -118,9 +154,56 @@ function dreamSelectFields(): {
   };
 }
 
-async function findOwnedDream(userId: string, dreamId: string): Promise<DreamSelectRow> {
+function dreamListSelectFields(): {
+  id: typeof dreams.id;
+  content: typeof dreams.content;
+  status: typeof dreams.status;
+  createdAt: typeof dreams.createdAt;
+} {
+  return {
+    id: dreams.id,
+    content: dreams.content,
+    status: dreams.status,
+    createdAt: dreams.createdAt,
+  };
+}
+
+function encodeDreamCursor(cursor: DreamCursor): string {
+  return Buffer.from(
+    JSON.stringify({
+      createdAt: cursor.createdAt.toISOString(),
+      id: cursor.id,
+    }),
+    'utf8',
+  ).toString('base64url');
+}
+
+function decodeDreamCursor(cursor: string): DreamCursor {
+  try {
+    const parsed = JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8')) as {
+      createdAt?: string;
+      id?: string;
+    };
+
+    if (!parsed.createdAt || !parsed.id) {
+      throw new Error('Missing cursor fields.');
+    }
+
+    const createdAt = new Date(parsed.createdAt);
+
+    if (Number.isNaN(createdAt.getTime())) {
+      throw new Error('Invalid cursor date.');
+    }
+
+    return { createdAt, id: parsed.id };
+  } catch {
+    throw new ValidationError('Gecersiz cursor.');
+  }
+}
+
+async function findOwnedDream(userId: string, dreamId: string): Promise<DreamDetailRow> {
   const [dream] = await db
-    .select(dreamSelectFields())
+    .select(dreamDetailSelectFields())
     .from(dreams)
     .innerJoin(interpreters, eq(dreams.interpreterId, interpreters.id))
     .where(and(eq(dreams.id, dreamId), eq(dreams.userId, userId)))
@@ -136,14 +219,30 @@ async function findOwnedDream(userId: string, dreamId: string): Promise<DreamSel
 export const dreamsService = {
   async createDream(userId: string, input: CreateDreamInput): Promise<DreamResponse> {
     const dream = await db.transaction(async (tx) => {
-      const [user] = await tx.select().from(users).where(eq(users.id, userId)).limit(1);
+      const [user] = await tx
+        .select({
+          plan: users.plan,
+          weeklyDreamCount: users.weeklyDreamCount,
+          extraCredits: users.extraCredits,
+          limitResetDate: users.limitResetDate,
+        })
+        .from(users)
+        .where(eq(users.id, userId))
+        .limit(1);
 
       if (!user) {
         throw new NotFoundError('Kullanici bulunamadi.');
       }
 
       const [interpreter] = await tx
-        .select()
+        .select({
+          id: interpreters.id,
+          name: interpreters.name,
+          description: interpreters.description,
+          imageUrl: interpreters.imageUrl,
+          isPremium: interpreters.isPremium,
+          sortOrder: interpreters.sortOrder,
+        })
         .from(interpreters)
         .where(and(eq(interpreters.id, input.interpreter_id), eq(interpreters.isActive, true)))
         .limit(1);
@@ -205,7 +304,17 @@ export const dreamsService = {
           content: input.content,
           status: DREAM_STATUS.PENDING,
         })
-        .returning();
+        .returning({
+          id: dreams.id,
+          content: dreams.content,
+          status: dreams.status,
+          interpretation: dreams.interpretation,
+          userRating: dreams.userRating,
+          userFeedbackText: dreams.userFeedbackText,
+          createdAt: dreams.createdAt,
+          updatedAt: dreams.updatedAt,
+          interpreterId: dreams.interpreterId,
+        });
 
       await tx.insert(creditTransactions).values({
         userId,
@@ -241,25 +350,38 @@ export const dreamsService = {
     return serializeDream(await findOwnedDream(userId, dreamId));
   },
 
-  async listDreams(userId: string, query: ListDreamsQuery): Promise<DreamResponse[]> {
-    const rows = await db
-      .select(dreamSelectFields())
-      .from(dreams)
-      .innerJoin(interpreters, eq(dreams.interpreterId, interpreters.id))
-      .where(eq(dreams.userId, userId))
-      .orderBy(desc(dreams.createdAt))
-      .limit(query.limit);
+  async listDreams(userId: string, query: ListDreamsQuery): Promise<DreamListResponse> {
+    const cursor = query.cursor ? decodeDreamCursor(query.cursor) : null;
+    const whereConditions = [eq(dreams.userId, userId)];
 
-    return rows.map(serializeDream);
+    if (cursor) {
+      const cursorCondition = or(
+        lt(dreams.createdAt, cursor.createdAt),
+        and(eq(dreams.createdAt, cursor.createdAt), lt(dreams.id, cursor.id)),
+      );
+
+      if (cursorCondition) {
+        whereConditions.push(cursorCondition);
+      }
+    }
+
+    const rows = await db
+      .select(dreamListSelectFields())
+      .from(dreams)
+      .where(and(...whereConditions))
+      .orderBy(desc(dreams.createdAt), desc(dreams.id))
+      .limit(query.limit + 1);
+
+    const pageRows = rows.slice(0, query.limit);
+    const hasMore = rows.length > query.limit;
+
+    return {
+      items: pageRows.map(serializeDreamListItem),
+      nextCursor: hasMore && pageRows.length > 0 ? encodeDreamCursor(pageRows[pageRows.length - 1]!) : null,
+    };
   },
 
   async submitFeedback(userId: string, dreamId: string, input: SubmitDreamFeedbackInput): Promise<DreamResponse> {
-    const dream = await findOwnedDream(userId, dreamId);
-
-    if (dream.status !== DREAM_STATUS.COMPLETED) {
-      throw new ForbiddenError('Sadece tamamlanmis ruyalar icin geri bildirim verilebilir.');
-    }
-
     const [updatedDream] = await db
       .update(dreams)
       .set({
@@ -267,18 +389,52 @@ export const dreamsService = {
         userFeedbackText: input.feedback_text ?? null,
         updatedAt: new Date(),
       })
-      .where(and(eq(dreams.id, dreamId), eq(dreams.userId, userId)))
-      .returning();
+      .from(interpreters)
+      .where(
+        and(
+          eq(dreams.id, dreamId),
+          eq(dreams.userId, userId),
+          eq(dreams.interpreterId, interpreters.id),
+          eq(dreams.status, DREAM_STATUS.COMPLETED),
+        ),
+      )
+      .returning({
+        id: dreams.id,
+        content: dreams.content,
+        status: dreams.status,
+        interpretation: dreams.interpretation,
+        userRating: dreams.userRating,
+        userFeedbackText: dreams.userFeedbackText,
+        createdAt: dreams.createdAt,
+        updatedAt: dreams.updatedAt,
+        interpreterId: interpreters.id,
+        interpreterName: interpreters.name,
+        interpreterDescription: interpreters.description,
+        interpreterImageUrl: interpreters.imageUrl,
+        interpreterIsPremium: interpreters.isPremium,
+        interpreterSortOrder: interpreters.sortOrder,
+      });
 
     if (!updatedDream) {
+      const [dream] = await db
+        .select({
+          status: dreams.status,
+        })
+        .from(dreams)
+        .where(and(eq(dreams.id, dreamId), eq(dreams.userId, userId)))
+        .limit(1);
+
+      if (!dream) {
+        throw new NotFoundError('Ruya bulunamadi.');
+      }
+
+      if (dream.status !== DREAM_STATUS.COMPLETED) {
+        throw new ForbiddenError('Sadece tamamlanmis ruyalar icin geri bildirim verilebilir.');
+      }
+
       throw new ValidationError('Geri bildirim kaydedilemedi.');
     }
 
-    return serializeDream({
-      ...dream,
-      userRating: updatedDream.userRating,
-      userFeedbackText: updatedDream.userFeedbackText,
-      updatedAt: updatedDream.updatedAt,
-    });
+    return serializeDream(updatedDream);
   },
 };

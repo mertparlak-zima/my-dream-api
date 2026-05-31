@@ -126,6 +126,22 @@ const DreamSchema = z
   })
   .openapi('Dream');
 
+const DreamListItemSchema = z
+  .object({
+    id: UuidSchema,
+    content: z.string().openapi({ example: 'Uzun bir koridorda yuruyordum ve deniz sesi duyuyordum.' }),
+    status: DreamStatusSchema,
+    createdAt: IsoDateSchema,
+  })
+  .openapi('DreamListItem');
+
+const DreamListPageSchema = z
+  .object({
+    items: z.array(DreamListItemSchema),
+    nextCursor: z.string().nullable().openapi({ example: null }),
+  })
+  .openapi('DreamListPage');
+
 const CreateDreamRequestSchema = z
   .object({
     content: z.string().min(DREAM_CONFIG.MIN_CONTENT_LENGTH).max(DREAM_CONFIG.MAX_CONTENT_LENGTH).openapi({
@@ -143,6 +159,13 @@ const ListDreamsQuerySchema = z.object({
     },
     example: 20,
   }),
+  cursor: z.string().max(200).optional().openapi({
+    param: {
+      name: 'cursor',
+      in: 'query',
+    },
+    example: null,
+  }),
 });
 
 const SubmitFeedbackRequestSchema = z
@@ -157,7 +180,7 @@ const CreditEnvelopeSchema = z.object({ success: z.literal(true), data: CreditSu
 const InterpreterEnvelopeSchema = z.object({ success: z.literal(true), data: InterpreterSchema }).openapi('InterpreterEnvelope');
 const InterpreterListEnvelopeSchema = z.object({ success: z.literal(true), data: z.array(InterpreterSchema) }).openapi('InterpreterListEnvelope');
 const DreamEnvelopeSchema = z.object({ success: z.literal(true), data: DreamSchema }).openapi('DreamEnvelope');
-const DreamListEnvelopeSchema = z.object({ success: z.literal(true), data: z.array(DreamSchema) }).openapi('DreamListEnvelope');
+const DreamListEnvelopeSchema = z.object({ success: z.literal(true), data: DreamListPageSchema }).openapi('DreamListEnvelope');
 
 const routes: RouteConfig[] = [
   {

@@ -8,6 +8,7 @@ export const createDreamSchema = z.object({
 
 export const listDreamsQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(20),
+  cursor: z.string().max(200).optional(),
 });
 
 export const dreamIdParamSchema = z.object({

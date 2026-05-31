@@ -1,11 +1,14 @@
 import { describe, expect, it } from 'vitest';
+import { eq } from 'drizzle-orm';
 import { PLAN, DREAM_STATUS } from '../../src/constants/domain';
+import { dreams } from '../../src/db/schema';
 import { appRequest } from '../helpers/app';
 import {
   createAuthedUserFixture,
   createDreamFixture,
   createInterpreterFixture,
 } from '../helpers/fixtures';
+import { testDb } from '../helpers/db';
 import { setupDatabaseTestFile } from '../helpers/lifecycle';
 
 async function requestJson(
@@ -274,18 +277,27 @@ describe('roadmap 0008 route contracts', () => {
     });
   });
 
-  it('GET /dreams default list returns an array contract for the current user', async () => {
+  it('GET /dreams returns a summary page contract with cursor pagination for the current user', async () => {
     const user = await createAuthedUserFixture();
     const otherUser = await createAuthedUserFixture();
     const interpreter = await createInterpreterFixture();
     for (let index = 0; index < 25; index += 1) {
-      await createDreamFixture({
+      const dream = await createDreamFixture({
         userId: user.id,
         interpreterId: interpreter.id,
         content: `vitest:user-dream-${index + 1}`,
         status: index % 2 === 0 ? DREAM_STATUS.PENDING : DREAM_STATUS.COMPLETED,
         interpretation: index % 2 === 0 ? null : `vitest:interpretation-${index + 1}`,
       });
+
+      const timestamp = new Date(Date.UTC(2024, 0, index + 1, 0, 0, 0, 0));
+      await testDb
+        .update(dreams)
+        .set({
+          createdAt: timestamp,
+          updatedAt: timestamp,
+        })
+        .where(eq(dreams.id, dream.id));
     }
 
     for (let index = 0; index < 3; index += 1) {
@@ -303,10 +315,26 @@ describe('roadmap 0008 route contracts', () => {
 
     expect(response.status).toBe(200);
     expect(json.success).toBe(true);
-    expect(Array.isArray(json.data)).toBe(true);
-    expect(json.data).toHaveLength(20);
-    expect(json.data.every((dream: { content: string }) => dream.content.startsWith('vitest:user-dream-'))).toBe(true);
-    expect(json.data.every((dream: { interpreter: unknown }) => dream.interpreter)).toBe(true);
+    expect(json.data.items).toHaveLength(20);
+    expect(json.data.nextCursor).toEqual(expect.any(String));
+    expect(json.data.items.every((dream: { content: string }) => dream.content.startsWith('vitest:user-dream-'))).toBe(true);
+    expect(json.data.items.every((dream: { interpreter: unknown }) => dream.interpreter === undefined)).toBe(true);
+    expect(json.data.items.every((dream: { interpretation: unknown }) => dream.interpretation === undefined)).toBe(true);
+
+    const secondPage = await requestJson(`/dreams?cursor=${encodeURIComponent(json.data.nextCursor)}`, {
+      headers: user.authHeaders,
+    });
+
+    expect(secondPage.response.status).toBe(200);
+    expect(secondPage.json.data.items).toHaveLength(5);
+    expect(secondPage.json.data.nextCursor).toBeNull();
+    expect(secondPage.json.data.items.map((dream: { content: string }) => dream.content)).toEqual([
+      'vitest:user-dream-5',
+      'vitest:user-dream-4',
+      'vitest:user-dream-3',
+      'vitest:user-dream-2',
+      'vitest:user-dream-1',
+    ]);
   });
 
   it('GET /dreams/:id returns the owner dream contract and NOT_FOUND for another authenticated user', async () => {
