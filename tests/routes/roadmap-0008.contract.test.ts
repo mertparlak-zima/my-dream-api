@@ -201,6 +201,12 @@ describe('roadmap 0008 route contracts', () => {
         image_url: null,
         is_premium: true,
         sort_order: 9,
+        // Enrichment (#41): a fixture interpreter has no enrichment → defaults.
+        rating: null,
+        reviews: 0,
+        styles: [],
+        story: null,
+        samples: [],
       },
     });
   });
