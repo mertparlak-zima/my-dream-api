@@ -1,6 +1,7 @@
 import { Redis } from 'ioredis';
 
 import { REDIS_URL } from '../config';
+import { addSentryBreadcrumb } from '../utils/sentry';
 
 /**
  * Shared Redis foundation for the De-Dummy & Backend Integration phase.
@@ -64,10 +65,14 @@ function createClient(url: string): Redis {
     commandTimeout: 1_000,
     retryStrategy: (times: number): number => Math.min(times * 200, 2000),
   });
+  for (const event of ['connect', 'ready', 'end'] as const) {
+    redis.on(event, () => addSentryBreadcrumb('redis', `redis ${event}`, {}, 'info'));
+  }
   redis.on('error', (error: Error) => {
-    // Keep the process alive on transient Redis errors; observability (#54)
-    // wires Sentry/metrics. Features degrade rather than crash.
+    // Keep the process alive on transient Redis errors; features degrade rather
+    // than crash. Log the message only (never the URL/credentials).
     console.error('[redis] connection error:', error.message);
+    addSentryBreadcrumb('redis', 'redis error', { message: error.message }, 'error');
   });
   registerShutdownHandlers();
   // Start connecting in the background so `status` reaches 'ready' even for

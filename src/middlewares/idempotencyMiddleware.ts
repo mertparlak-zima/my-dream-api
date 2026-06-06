@@ -5,6 +5,7 @@ import { createHash } from 'node:crypto';
 
 import { AppError } from '../errors/AppError';
 import { ConflictError } from '../errors/ConflictError';
+import { METRIC, incrementMetric } from '../utils/metrics';
 import { REDIS_NS, getReadyRedis, redisKey } from '../services/redis';
 
 /**
@@ -92,6 +93,7 @@ export function createIdempotencyMiddleware(options: IdempotencyOptions = {}): M
           'IDEMPOTENCY_KEY_REUSED',
         );
       }
+      incrementMetric(METRIC.idempotencyReplayed);
       c.header('Idempotent-Replayed', 'true');
       c.res = c.newResponse(record.body, record.status as ContentfulStatusCode, {
         'Content-Type': record.contentType,

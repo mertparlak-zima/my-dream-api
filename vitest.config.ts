@@ -17,6 +17,7 @@ export default defineConfig({
         'src/constants/domain.ts',
         'src/errors/*.ts',
         'src/utils/date.ts',
+        'src/utils/metrics.ts',
         'src/middlewares/errorHandler.ts',
         'src/middlewares/idempotencyMiddleware.ts',
         'src/middlewares/rateLimitMiddleware.ts',

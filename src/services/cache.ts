@@ -1,3 +1,4 @@
+import { METRIC, incrementMetric } from '../utils/metrics';
 import { REDIS_NS, getRedis, redisKey } from './redis';
 
 /**
@@ -74,6 +75,7 @@ export async function cached<T>(
     try {
       const hit = await client.get(fullKey);
       if (hit !== null) {
+        incrementMetric(METRIC.cacheHit);
         return JSON.parse(hit) as T;
       }
     } catch {
@@ -83,16 +85,19 @@ export async function cached<T>(
 
   const value = await loader();
 
-  if (client && value !== undefined) {
-    try {
-      await client.set(
-        fullKey,
-        JSON.stringify(value),
-        'EX',
-        ttlWithJitter(options.ttlSeconds, options.jitterRatio),
-      );
-    } catch {
-      // Write failure is non-fatal; the caller already has the value.
+  if (client) {
+    incrementMetric(METRIC.cacheMiss);
+    if (value !== undefined) {
+      try {
+        await client.set(
+          fullKey,
+          JSON.stringify(value),
+          'EX',
+          ttlWithJitter(options.ttlSeconds, options.jitterRatio),
+        );
+      } catch {
+        // Write failure is non-fatal; the caller already has the value.
+      }
     }
   }
 

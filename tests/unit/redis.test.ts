@@ -117,10 +117,14 @@ describe('redis service (enabled mode, mocked ioredis)', () => {
     expect(instances[0].connect).toHaveBeenCalled();
   });
 
-  it('logs on the error event and caps retry backoff', () => {
+  it('emits breadcrumbs on lifecycle events, logs errors, and caps retry backoff', () => {
     redisMod.getRedis();
     const inst = instances[0];
     const errSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    // Lifecycle handlers (breadcrumb no-ops when Sentry is disabled in tests).
+    inst.handlers.connect();
+    inst.handlers.ready();
+    inst.handlers.end();
     inst.handlers.error(new Error('boom'));
     expect(errSpy).toHaveBeenCalled();
     expect(inst.opts.retryStrategy(1)).toBe(200);
