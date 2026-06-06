@@ -11,6 +11,7 @@ import { usersRoutes } from './features/users/users.controller';
 import { errorHandler } from './middlewares/errorHandler';
 import { createRateLimitMiddleware } from './middlewares/rateLimitMiddleware';
 import { registerOpenApi } from './openapi/register';
+import { redisPing } from './services/redis';
 import { captureDebugSentryEvent, initSentry, isSentryEnabled } from './utils/sentry';
 
 await initSentry();
@@ -32,8 +33,9 @@ app.get('/', (c) => {
   return c.json({ success: true, message: 'My Dream API v1.0' });
 });
 
-app.get('/health', (c) => {
-  return c.json({ success: true, status: 'ok' });
+app.get('/health', async (c) => {
+  const redis = await redisPing();
+  return c.json({ success: true, status: 'ok', redis });
 });
 
 if (process.env.NODE_ENV !== 'production') {

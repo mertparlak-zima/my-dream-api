@@ -54,6 +54,7 @@ describe('roadmap 0008 route contracts', () => {
     await expect(response.json()).resolves.toEqual({
       success: true,
       status: 'ok',
+      redis: 'disabled',
     });
   });
 

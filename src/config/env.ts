@@ -47,6 +47,7 @@ const rawEnvSchema = z.object({
   NODE_ENV: z.enum(NODE_ENV_VALUES).default('development'),
   PORT: optionalPositiveInteger,
   DATABASE_URL: optionalString,
+  REDIS_URL: optionalString,
   JWT_SECRET: optionalString,
   OPENROUTER_API_KEY: optionalString,
   SUPABASE_URL: optionalUrl.transform((value) => (value ? trimTrailingSlash(value) : undefined)),
