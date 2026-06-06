@@ -72,6 +72,9 @@ function createClient(url: string): Redis {
     console.error('[redis] connection error:', error.message);
   });
   registerShutdownHandlers();
+  // Start connecting in the background so `status` reaches 'ready' even for
+  // readiness-gated callers (rate-limit) that fast-skip when not connected.
+  void redis.connect().catch(() => undefined);
   return redis;
 }
 
@@ -85,6 +88,16 @@ export function getRedis(): Redis | null {
     client = createClient(REDIS_URL as string);
   }
   return client;
+}
+
+/**
+ * Returns the shared client only when it is connected and ready, otherwise
+ * `null`. Use for hot paths (rate-limit) that must fast-skip to a local
+ * fallback instead of waiting on a connecting/down Redis.
+ */
+export function getReadyRedis(): Redis | null {
+  const redis = getRedis();
+  return redis !== null && redis.status === 'ready' ? redis : null;
 }
 
 /** Liveness ping. `disabled` when unconfigured, `error` on failure. */
