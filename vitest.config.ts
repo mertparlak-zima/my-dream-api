@@ -25,7 +25,6 @@ export default defineConfig({
         'src/features/credits/credits.service.ts',
         'src/features/interpreters/interpreters.service.ts',
         'src/services/cache.ts',
-        'src/services/counter.ts',
         'src/services/redis.ts',
       ],
       thresholds: {

@@ -5,10 +5,9 @@ import { REDIS_URL } from '../config';
 /**
  * Shared Redis foundation for the De-Dummy & Backend Integration phase.
  *
- * One Redis instance backs cache, rate-limiting, idempotency and ephemeral
- * counters; logical separation is by **key-prefix** (`cache:` / `rl:` / `idem:`
- * / `ctr:`), and the future BullMQ queue (Step 5) reuses the same instance under
- * its own `bull:` prefix.
+ * One Redis instance backs cache, rate-limiting and idempotency; logical
+ * separation is by **key-prefix** (`cache:` / `rl:` / `idem:`), and the future
+ * BullMQ queue (Step 5) reuses the same instance under its own `bull:` prefix.
  *
  * Redis is **optional**: when `REDIS_URL` is unset the app runs in a degraded
  * mode (callers fall back to their source of truth). TLS is automatic when the
@@ -24,7 +23,6 @@ export const REDIS_NS = {
   cache: 'cache',
   rateLimit: 'rl',
   idempotency: 'idem',
-  counter: 'ctr',
 } as const;
 
 let client: Redis | null = null;

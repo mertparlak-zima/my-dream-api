@@ -35,7 +35,7 @@ describe('redis service', () => {
     });
 
     it('exposes the standard namespaces', () => {
-      expect(REDIS_NS).toEqual({ cache: 'cache', rateLimit: 'rl', idempotency: 'idem', counter: 'ctr' });
+      expect(REDIS_NS).toEqual({ cache: 'cache', rateLimit: 'rl', idempotency: 'idem' });
     });
   });
 
