@@ -102,6 +102,14 @@ describe('cached', () => {
     await expect(cached('k', { ttlSeconds: 10, jitterRatio: 0 }, async () => 'v')).resolves.toBe('v');
   });
 
+  it('does not cache an undefined loader result', async () => {
+    const redis = makeRedis();
+    getRedisMock.mockReturnValue(redis as never);
+
+    await expect(cached('k', { ttlSeconds: 10 }, async () => undefined)).resolves.toBeUndefined();
+    expect(redis.set).not.toHaveBeenCalled();
+  });
+
   it('bypasses the cache when Redis is unavailable', async () => {
     getRedisMock.mockReturnValue(null);
     const loader = vi.fn(async () => 'v');

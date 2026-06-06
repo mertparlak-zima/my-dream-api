@@ -83,7 +83,7 @@ export async function cached<T>(
 
   const value = await loader();
 
-  if (client) {
+  if (client && value !== undefined) {
     try {
       await client.set(
         fullKey,

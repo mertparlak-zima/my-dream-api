@@ -60,6 +60,10 @@ function createClient(url: string): Redis {
     lazyConnect: true,
     enableReadyCheck: true,
     maxRetriesPerRequest: 2,
+    // Bound every command so a down/unreachable Redis degrades fast (cache and
+    // /health fall back) instead of hanging on the offline queue.
+    connectTimeout: 10_000,
+    commandTimeout: 1_000,
     retryStrategy: (times: number): number => Math.min(times * 200, 2000),
   });
   redis.on('error', (error: Error) => {
