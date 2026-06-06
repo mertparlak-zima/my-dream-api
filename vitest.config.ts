@@ -23,6 +23,7 @@ export default defineConfig({
         'src/features/credits/credits.service.ts',
         'src/features/interpreters/interpreters.service.ts',
         'src/services/cache.ts',
+        'src/services/counter.ts',
       ],
       thresholds: {
         statements: 100,
