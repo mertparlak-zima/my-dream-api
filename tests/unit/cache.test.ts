@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { cached, invalidate, invalidatePrefix } from '../../src/services/cache';
+import { CACHE_KEY, CACHE_TTL, cached, invalidate, invalidatePrefix } from '../../src/services/cache';
 import { getRedis } from '../../src/services/redis';
 
 vi.mock('../../src/services/redis', async (importOriginal) => {
@@ -35,6 +35,18 @@ beforeEach(() => {
 afterEach(() => {
   vi.restoreAllMocks();
   delete process.env.CACHE_DISABLED;
+});
+
+describe('cache policy', () => {
+  it('defines positive TTLs ordered by how often each dataset changes', () => {
+    expect(CACHE_TTL.DICTIONARY).toBeGreaterThan(0);
+    expect(CACHE_TTL.DICTIONARY).toBeGreaterThanOrEqual(CACHE_TTL.INTERPRETERS);
+    expect(CACHE_TTL.INTERPRETERS).toBeGreaterThanOrEqual(CACHE_TTL.UPDATES);
+  });
+
+  it('exposes canonical cache key prefixes', () => {
+    expect(CACHE_KEY).toEqual({ dictionary: 'dict', interpreters: 'interpreters', updates: 'updates' });
+  });
 });
 
 describe('cached', () => {

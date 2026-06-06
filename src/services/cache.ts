@@ -15,8 +15,34 @@ import { REDIS_NS, getRedis, redisKey } from './redis';
  * Roadmap: project-docs `0016-de-dummy-backend-integration.md` · issue #50.
  */
 
+/**
+ * Centralized TTL policy (seconds) so cache lifetimes are consistent and
+ * intentional across endpoints — tuned to how often each dataset changes.
+ * Every cached read is also invalidated on the matching write, so these are
+ * staleness ceilings, not the primary freshness mechanism.
+ */
+export const CACHE_TTL = {
+  /** Symbols / themes / categories — static reference data. */
+  DICTIONARY: 24 * 60 * 60, // 24h
+  /** Interpreter directory + enrichment — semi-static. */
+  INTERPRETERS: 60 * 60, // 1h
+  /** Yenilikler editorial feed — changes more often. */
+  UPDATES: 5 * 60, // 5m
+} as const;
+
+/**
+ * Canonical cache keys / prefixes (without the `cache:` namespace, which
+ * {@link cached} adds). Writes invalidate the single key and/or the prefix so
+ * list + detail entries stay consistent.
+ */
+export const CACHE_KEY = {
+  dictionary: 'dict',
+  interpreters: 'interpreters',
+  updates: 'updates',
+} as const;
+
 export type CachedOptions = {
-  /** Base time-to-live in seconds. */
+  /** Base time-to-live in seconds (use a {@link CACHE_TTL} value). */
   ttlSeconds: number;
   /** Random extra TTL fraction (0–1) to de-synchronize expiry. Default 0.1. */
   jitterRatio?: number;
