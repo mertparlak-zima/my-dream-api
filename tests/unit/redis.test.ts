@@ -53,3 +53,119 @@ describe('redis service', () => {
     });
   });
 });
+
+describe('redis service (enabled mode, mocked ioredis)', () => {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let redisMod: typeof import('../../src/services/redis');
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let instances: any[];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let onceSpy: any;
+
+  beforeEach(async () => {
+    vi.resetModules();
+    process.env.REDIS_URL = 'redis://localhost:6379';
+    instances = [];
+
+    class FakeRedis {
+      status = 'ready';
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      handlers: Record<string, (arg: any) => void> = {};
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      opts: any;
+      url: string;
+      connect = vi.fn(async () => { this.status = 'ready'; });
+      ping = vi.fn(async () => 'PONG');
+      quit = vi.fn(async () => 'OK');
+      disconnect = vi.fn(() => undefined);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      constructor(url: string, opts: any) {
+        this.url = url;
+        this.opts = opts;
+        instances.push(this);
+      }
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      on(event: string, cb: (arg: any) => void) {
+        this.handlers[event] = cb;
+        return this;
+      }
+    }
+
+    vi.doMock('ioredis', () => ({ Redis: FakeRedis }));
+    onceSpy = vi.spyOn(process, 'once').mockImplementation(() => process);
+    redisMod = await import('../../src/services/redis');
+  });
+
+  afterEach(() => {
+    delete process.env.REDIS_URL;
+    onceSpy.mockRestore();
+    vi.doUnmock('ioredis');
+    vi.resetModules();
+  });
+
+  it('creates one shared client with bounded options + background connect', () => {
+    const a = redisMod.getRedis();
+    const b = redisMod.getRedis();
+    expect(a).toBe(b);
+    expect(instances).toHaveLength(1);
+    expect(instances[0].opts).toMatchObject({
+      lazyConnect: true,
+      maxRetriesPerRequest: 2,
+      connectTimeout: 10_000,
+      commandTimeout: 1_000,
+    });
+    expect(instances[0].connect).toHaveBeenCalled();
+  });
+
+  it('logs on the error event and caps retry backoff', () => {
+    redisMod.getRedis();
+    const inst = instances[0];
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    inst.handlers.error(new Error('boom'));
+    expect(errSpy).toHaveBeenCalled();
+    expect(inst.opts.retryStrategy(1)).toBe(200);
+    expect(inst.opts.retryStrategy(100)).toBe(2000);
+    errSpy.mockRestore();
+  });
+
+  it('getReadyRedis returns the client only when status is ready', () => {
+    const c = redisMod.getRedis();
+    expect(redisMod.getReadyRedis()).toBe(c);
+    instances[0].status = 'connecting';
+    expect(redisMod.getReadyRedis()).toBeNull();
+  });
+
+  it('redisPing reports ok / error (non-PONG) / error (throw)', async () => {
+    redisMod.getRedis();
+    const inst = instances[0];
+    await expect(redisMod.redisPing()).resolves.toBe('ok');
+    inst.ping.mockResolvedValueOnce('NOPE');
+    await expect(redisMod.redisPing()).resolves.toBe('error');
+    inst.ping.mockRejectedValueOnce(new Error('down'));
+    await expect(redisMod.redisPing()).resolves.toBe('error');
+  });
+
+  it('closeRedis quits and a fresh client re-enters createClient (shutdown guard)', async () => {
+    redisMod.getRedis();
+    await redisMod.closeRedis();
+    expect(instances[0].quit).toHaveBeenCalled();
+    redisMod.getRedis(); // second createClient → registerShutdownHandlers early-returns
+    expect(instances).toHaveLength(2);
+  });
+
+  it('closeRedis falls back to disconnect when quit throws', async () => {
+    redisMod.getRedis();
+    instances[0].quit.mockRejectedValueOnce(new Error('quit failed'));
+    await redisMod.closeRedis();
+    expect(instances[0].disconnect).toHaveBeenCalled();
+  });
+
+  it('registers a SIGTERM handler that closes redis', async () => {
+    redisMod.getRedis();
+    const sigterm = onceSpy.mock.calls.find((args: unknown[]) => args[0] === 'SIGTERM');
+    expect(sigterm).toBeTruthy();
+    sigterm[1]();
+    await Promise.resolve();
+    expect(instances[0].quit).toHaveBeenCalled();
+  });
+});

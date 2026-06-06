@@ -183,6 +183,16 @@ describe('rateLimitMiddleware', () => {
     expect(response3.status).toBe(200);
   });
 
+  it('falls back to a shared dev identity when x-forwarded-for has no valid IP', async () => {
+    const { app } = await createRateLimitApp({ NODE_ENV: 'test' });
+
+    const withGarbage = await app.request('/ping', { headers: { 'x-forwarded-for': 'not-an-ip' } });
+    const withNoHeaders = await app.request('/ping');
+
+    expect(withGarbage.status).toBe(200);
+    expect(withNoHeaders.status).toBe(200);
+  });
+
   it('cleans up expired buckets before handling a new request', async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-01-01T00:00:00.000Z'));

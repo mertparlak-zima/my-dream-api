@@ -73,6 +73,20 @@ describe('idempotency middleware', () => {
     await expect(res.json()).resolves.toMatchObject({ error: { code: 'IDEMPOTENCY_UNAVAILABLE' } });
   });
 
+  it('honours explicit ttlMs and the default prefix', async () => {
+    const fake = makeFakeRedis();
+    getReadyRedisMock.mockReturnValue(fake as never);
+    const app = new Hono();
+    app.onError(errorHandler);
+    app.use('*', createIdempotencyMiddleware({ ttlMs: 60_000 })); // explicit ttl, default prefix
+    app.post('/spend', (c) => c.json({ ok: true }));
+
+    const res = await app.request('/spend', { method: 'POST', headers: KEY, body: '{}' });
+
+    expect(res.status).toBe(200);
+    expect([...fake.store.keys()][0]).toContain('idem:default:');
+  });
+
   it('runs once and replays the stored response for a duplicate key', async () => {
     const fake = makeFakeRedis();
     getReadyRedisMock.mockReturnValue(fake as never);

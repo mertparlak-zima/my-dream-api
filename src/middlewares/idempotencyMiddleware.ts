@@ -99,14 +99,12 @@ export function createIdempotencyMiddleware(options: IdempotencyOptions = {}): M
       return;
     }
 
-    try {
-      await next();
-    } catch (error) {
-      // Failed execution must not be cached — drop the lock so a retry can run.
-      await client.del(key);
-      throw error;
-    }
+    await next();
 
+    // Hono routes errors through app.onError, so a thrown handler surfaces here
+    // as a response (not a rejection): a 5xx is transient → drop the key so a
+    // retry can run; any other status (incl. 4xx business errors like "no
+    // credits") is deterministic → store it so retries replay the same result.
     const response = c.res;
     if (response.status >= 500) {
       await client.del(key);
