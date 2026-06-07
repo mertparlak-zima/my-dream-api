@@ -28,6 +28,7 @@ export default defineConfig({
         'src/features/dreams/dreams.processor.ts',
         'src/features/credits/credits.service.ts',
         'src/features/interpreters/interpreters.service.ts',
+        'src/features/users/user_preferences.service.ts',
         'src/services/cache.ts',
         'src/services/redis.ts',
       ],

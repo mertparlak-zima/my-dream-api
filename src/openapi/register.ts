@@ -1,7 +1,7 @@
 import type { OpenAPIHono, RouteConfig } from '@hono/zod-openapi';
 import { z } from '@hono/zod-openapi';
 import { DREAM_CONFIG } from '../config';
-import { AUTH_PROVIDERS, DREAM_STATUSES, PLANS } from '../constants/domain';
+import { AUTH_PROVIDERS, DREAM_STATUSES, LANGUAGES, PLANS, TEXT_SIZES } from '../constants/domain';
 
 const bearerSecurity = [{ BearerAuth: [] }];
 
@@ -190,6 +190,27 @@ const SetBookmarkRequestSchema = z
   })
   .openapi('SetBookmarkRequest');
 
+const TextSizeSchema = z.enum(TEXT_SIZES).openapi('TextSize');
+const LanguageSchema = z.enum(LANGUAGES).openapi('Language');
+
+const PreferencesSchema = z
+  .object({
+    text_size: TextSizeSchema.openapi({ example: 'normal' }),
+    language: LanguageSchema.openapi({ example: 'tr' }),
+  })
+  .openapi('Preferences');
+
+const UpdatePreferencesRequestSchema = z
+  .object({
+    text_size: TextSizeSchema.optional().openapi({ example: 'large' }),
+    language: LanguageSchema.optional().openapi({ example: 'en' }),
+  })
+  .openapi('UpdatePreferencesRequest');
+
+const PreferencesEnvelopeSchema = z
+  .object({ success: z.literal(true), data: PreferencesSchema })
+  .openapi('PreferencesEnvelope');
+
 const UserEnvelopeSchema = z.object({ success: z.literal(true), data: UserSchema }).openapi('UserEnvelope');
 const CreditEnvelopeSchema = z.object({ success: z.literal(true), data: CreditSummarySchema }).openapi('CreditEnvelope');
 const InterpreterEnvelopeSchema = z.object({ success: z.literal(true), data: InterpreterSchema }).openapi('InterpreterEnvelope');
@@ -282,6 +303,74 @@ const routes: RouteConfig[] = [
       },
       404: {
         description: 'User not found.',
+        content: {
+          'application/json': {
+            schema: ErrorEnvelopeSchema,
+          },
+        },
+      },
+    },
+  },
+  {
+    method: 'get',
+    path: '/users/me/preferences',
+    tags: ['Users'],
+    summary: 'Get current user UI preferences',
+    security: bearerSecurity,
+    responses: {
+      200: {
+        description: 'User preferences (column defaults when none set).',
+        content: {
+          'application/json': {
+            schema: PreferencesEnvelopeSchema,
+          },
+        },
+      },
+      401: {
+        description: 'Missing or invalid authentication.',
+        content: {
+          'application/json': {
+            schema: ErrorEnvelopeSchema,
+          },
+        },
+      },
+    },
+  },
+  {
+    method: 'patch',
+    path: '/users/me/preferences',
+    tags: ['Users'],
+    summary: 'Update current user UI preferences',
+    security: bearerSecurity,
+    request: {
+      body: {
+        required: true,
+        content: {
+          'application/json': {
+            schema: UpdatePreferencesRequestSchema,
+          },
+        },
+      },
+    },
+    responses: {
+      200: {
+        description: 'Updated preferences.',
+        content: {
+          'application/json': {
+            schema: PreferencesEnvelopeSchema,
+          },
+        },
+      },
+      400: {
+        description: 'Validation error.',
+        content: {
+          'application/json': {
+            schema: ErrorEnvelopeSchema,
+          },
+        },
+      },
+      401: {
+        description: 'Missing or invalid authentication.',
         content: {
           'application/json': {
             schema: ErrorEnvelopeSchema,

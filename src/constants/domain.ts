@@ -22,6 +22,14 @@ export const DREAM_STATUS = {
   FAILED: DREAM_STATUSES[3],
 } as const satisfies Record<DreamStatus, DreamStatus>;
 
+export const TEXT_SIZES = ['small', 'normal', 'large', 'xlarge'] as const;
+export type TextSize = (typeof TEXT_SIZES)[number];
+export const DEFAULT_TEXT_SIZE: TextSize = 'normal';
+
+export const LANGUAGES = ['tr', 'en'] as const;
+export type Language = (typeof LANGUAGES)[number];
+export const DEFAULT_LANGUAGE: Language = 'tr';
+
 export const CREDIT_TRANSACTION_TYPES = ['USED_WEEKLY', 'USED_EXTRA', 'PURCHASED', 'REFUNDED'] as const;
 export type CreditTransactionType = (typeof CREDIT_TRANSACTION_TYPES)[number];
 export const CREDIT_TRANSACTION_TYPE = {
