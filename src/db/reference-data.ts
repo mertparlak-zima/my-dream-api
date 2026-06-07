@@ -117,6 +117,70 @@ function slugify(input: string): string {
   return foldString(input).replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
 }
 
+export type AppUpdateTag = 'new_interpreter' | 'new_feature' | 'improvement';
+
+export type ReferenceUpdate = {
+  slug: string;
+  tag: AppUpdateTag;
+  isNew: boolean;
+  publishedAt: Date;
+  titleTr: string;
+  blurbTr: string;
+  mediaTr: string;
+  bodyTr: string[];
+};
+
+/** "Yenilikler" timeline content (#47). Turkish now; en filled later (fallback). */
+export const REFERENCE_UPDATES: ReferenceUpdate[] = [
+  {
+    slug: 'u1-muneccim-zuhre', tag: 'new_interpreter', isNew: true, publishedAt: new Date('2026-05-28T00:00:00.000Z'),
+    titleTr: 'Müneccim Zühre artık aramızda',
+    blurbTr: 'Rüyanı burcun ve gök hareketleriyle yorumlayan yeni astrolojik yorumcumuzla tanış.',
+    mediaTr: 'Müneccim Zühre tanıtım görseli',
+    bodyTr: [
+      'Uzun zamandır beklenen astrolojik yorumcumuz Müneccim Zühre, artık Keşfet sekmesinde seni bekliyor.',
+      'Rüyalarını yalnızca sembollerle değil; burcun, gezegenlerin konumu ve içinde bulunduğun döngülerle birlikte ele alıyor. Pro üyeler hemen bir rüya yorumlatabilir.',
+    ],
+  },
+  {
+    slug: 'u2-sesli-anlatim', tag: 'new_feature', isNew: true, publishedAt: new Date('2026-05-14T00:00:00.000Z'),
+    titleTr: 'Rüyanı sesinle anlat',
+    blurbTr: 'Artık rüyanı yazmak yerine sesinle anlatabilirsin; uygulama senin için metne çevirir.',
+    mediaTr: 'Sesli anlatma ekranı',
+    bodyTr: [
+      'Sabahın erken saatinde yazmak zor olabiliyor. Yeni sesli anlatım özelliğiyle mikrofona dokun, rüyanı anlat; gerisini bize bırak.',
+      'Konuşmanı otomatik olarak metne çeviriyor, dilersen göndermeden önce düzenleyebiliyorsun.',
+    ],
+  },
+  {
+    slug: 'u3-gunluk-arama', tag: 'improvement', isNew: false, publishedAt: new Date('2026-05-02T00:00:00.000Z'),
+    titleTr: 'Günlükte arama ve filtreleme',
+    blurbTr: 'Geçmiş rüyalarını sembole, yorumcuya veya tarihe göre saniyeler içinde bul.',
+    mediaTr: 'Günlük arama görseli',
+    bodyTr: [
+      'Rüya günlüğün büyüdükçe aradığını bulmak zorlaşıyordu. Artık günlüğün en üstündeki arama çubuğuyla rüyalarını başlığa, sembole ve yorumcuya göre süzebilirsin.',
+    ],
+  },
+  {
+    slug: 'u4-gunun-sembolu', tag: 'improvement', isNew: false, publishedAt: new Date('2026-04-20T00:00:00.000Z'),
+    titleTr: 'Günün sembolü yenilendi',
+    blurbTr: 'Her gün karşına çıkan sembol kartı artık daha zengin açıklamalar içeriyor.',
+    mediaTr: 'Günün sembolü kartı',
+    bodyTr: [
+      'Keşfet sekmesindeki “Günün sembolü” kartını yeniledik. Artık her sembolün kısa hikayesini, kültürel anlamını ve sık görülen yorumlarını bir arada bulabilirsin.',
+    ],
+  },
+  {
+    slug: 'u5-yazi-boyutu', tag: 'new_feature', isNew: false, publishedAt: new Date('2026-04-05T00:00:00.000Z'),
+    titleTr: 'Yazı boyutu ayarı',
+    blurbTr: 'Rüya yorumlarını daha rahat okuman için yazı boyutunu profilinden ayarla.',
+    mediaTr: 'Yazı boyutu ekranı',
+    bodyTr: [
+      'Profil sayfasına yazı boyutu ayarı ekledik. Küçükten çok büyüğe dört seçenekten dilediğini seçerek tüm uygulamadaki yazıları gözüne en uygun boyuta getirebilirsin.',
+    ],
+  },
+];
+
 /**
  * Builds dictionary rows for seed + migration. `searchTr` is auto-computed as
  * the Turkish-folded haystack `fold(name + kw + brief/tagline)` — this is what

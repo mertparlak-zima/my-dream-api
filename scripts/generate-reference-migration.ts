@@ -11,8 +11,13 @@ import {
   DEFAULT_MODEL_ID,
   REFERENCE_INTERPRETERS,
   REFERENCE_MODEL,
+  REFERENCE_UPDATES,
   buildDictionaryRows,
 } from '../src/db/reference-data';
+
+// Pass a section to emit only part of the data, e.g.:
+//   bun scripts/generate-reference-migration.ts updates
+const only = process.argv[2];
 
 function q(value: string | null): string {
   return value === null ? 'NULL' : `'${value.replace(/'/g, "''")}'`;
@@ -33,6 +38,19 @@ function jsonb(value: unknown): string {
 }
 
 const statements: string[] = [];
+
+// Updates-only section (separate data migration).
+if (only === 'updates') {
+  for (const u of REFERENCE_UPDATES) {
+    statements.push(
+      `INSERT INTO "app_updates" ("slug", "tag", "is_new", "published_at", "title_tr", "blurb_tr", "media_tr", "body_tr")\n` +
+        `VALUES (${q(u.slug)}, ${q(u.tag)}, ${u.isNew}, ${q(u.publishedAt.toISOString())}, ${q(u.titleTr)}, ${q(u.blurbTr)}, ${q(u.mediaTr)}, ${textArray(u.bodyTr)})\n` +
+        `ON CONFLICT ("slug") DO NOTHING;`,
+    );
+  }
+  console.log(statements.join('\n--> statement-breakpoint\n'));
+  process.exit(0);
+}
 
 // 1) Default AI model.
 statements.push(

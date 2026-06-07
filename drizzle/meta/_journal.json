@@ -36,6 +36,20 @@
       "when": 1780780690713,
       "tag": "0004_reference_data",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1780811886117,
+      "tag": "0005_nifty_molten_man",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1780811886692,
+      "tag": "0006_updates_data",
+      "breakpoints": true
     }
   ]
 }

@@ -3,12 +3,14 @@ import { AUTH_PROVIDER, PLAN } from '../constants/domain';
 import { aiModels } from '../features/ai_models/models.schema';
 import { dictionaryEntries } from '../features/dictionary/dictionary.schema';
 import { interpreters } from '../features/interpreters/interpreters.schema';
+import { appUpdates } from '../features/updates/updates.schema';
 import { users } from '../features/users/users.schema';
 import { getNextWeeklyResetDate } from '../utils/date';
 import {
   DEFAULT_MODEL_ID,
   REFERENCE_INTERPRETERS,
   REFERENCE_MODEL,
+  REFERENCE_UPDATES,
   buildDictionaryRows,
 } from './reference-data';
 import { parseSeedPolicy, type SeedPolicy } from './seed.policy';
@@ -48,6 +50,16 @@ async function seedDictionaryRows(seedDb: SeedDatabase, now: Date): Promise<void
       .insert(dictionaryEntries)
       .values(values)
       .onConflictDoUpdate({ target: dictionaryEntries.slug, set: values });
+  }
+}
+
+async function seedUpdateRows(seedDb: SeedDatabase, now: Date): Promise<void> {
+  for (const update of REFERENCE_UPDATES) {
+    const values = { ...update, bodyTr: [...update.bodyTr], updatedAt: now };
+    await seedDb
+      .insert(appUpdates)
+      .values(values)
+      .onConflictDoUpdate({ target: appUpdates.slug, set: values });
   }
 }
 
@@ -91,6 +103,7 @@ async function seed(policy: SeedPolicy): Promise<void> {
     await seedModel(tx, now);
     await seedInterpreterRows(tx, now);
     await seedDictionaryRows(tx, now);
+    await seedUpdateRows(tx, now);
 
     await seedDevUser(tx, now);
   });

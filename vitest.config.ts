@@ -20,6 +20,7 @@ export default defineConfig({
         'src/utils/metrics.ts',
         'src/utils/turkishSearch.ts',
         'src/features/dictionary/dictionary.service.ts',
+        'src/features/updates/updates.service.ts',
         'src/middlewares/errorHandler.ts',
         'src/middlewares/idempotencyMiddleware.ts',
         'src/middlewares/rateLimitMiddleware.ts',

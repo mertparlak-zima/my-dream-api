@@ -6,6 +6,7 @@ import { authRoutes } from './features/auth/auth.controller';
 import { creditsRoutes } from './features/credits/credits.controller';
 import { dictionaryRoutes } from './features/dictionary/dictionary.controller';
 import { dreamsRoutes } from './features/dreams/dreams.controller';
+import { updatesRoutes } from './features/updates/updates.controller';
 import { interpretersRoutes } from './features/interpreters/interpreters.controller';
 import { NotFoundError } from './errors/NotFoundError';
 import { usersRoutes } from './features/users/users.controller';
@@ -78,6 +79,7 @@ app.route('/auth', authRoutes);
 app.route('/users', usersRoutes);
 app.route('/interpreters', interpretersRoutes);
 app.route('/dictionary', dictionaryRoutes);
+app.route('/updates', updatesRoutes);
 app.route('/dreams', dreamsRoutes);
 app.route('/credits', creditsRoutes);
 
