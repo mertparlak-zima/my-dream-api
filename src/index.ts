@@ -4,6 +4,7 @@ import { cors } from 'hono/cors';
 import { CORS_CONFIG } from './config';
 import { authRoutes } from './features/auth/auth.controller';
 import { creditsRoutes } from './features/credits/credits.controller';
+import { dictionaryRoutes } from './features/dictionary/dictionary.controller';
 import { dreamsRoutes } from './features/dreams/dreams.controller';
 import { interpretersRoutes } from './features/interpreters/interpreters.controller';
 import { NotFoundError } from './errors/NotFoundError';
@@ -76,6 +77,7 @@ app.get('/docs', Scalar((c) => ({
 app.route('/auth', authRoutes);
 app.route('/users', usersRoutes);
 app.route('/interpreters', interpretersRoutes);
+app.route('/dictionary', dictionaryRoutes);
 app.route('/dreams', dreamsRoutes);
 app.route('/credits', creditsRoutes);
 

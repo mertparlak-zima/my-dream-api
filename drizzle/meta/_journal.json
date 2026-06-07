@@ -15,6 +15,27 @@
       "when": 1778753618624,
       "tag": "0001_add_query_indexes",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1780779424191,
+      "tag": "0002_ordinary_lord_hawal",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1780779534399,
+      "tag": "0003_vengeful_kat_farrell",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1780780690713,
+      "tag": "0004_reference_data",
+      "breakpoints": true
     }
   ]
 }

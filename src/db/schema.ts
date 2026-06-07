@@ -3,5 +3,6 @@ export * from '../features/users/users.schema';
 export * from '../features/users/user_profiles.schema';
 export * from '../features/ai_models/models.schema';
 export * from '../features/interpreters/interpreters.schema';
+export * from '../features/dictionary/dictionary.schema';
 export * from '../features/dreams/dreams.schema';
 export * from '../features/credits/credits.schema';

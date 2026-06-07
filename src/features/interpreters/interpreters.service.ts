@@ -2,11 +2,7 @@ import { and, asc, eq } from 'drizzle-orm';
 import { db } from '../../db';
 import { NotFoundError } from '../../errors/NotFoundError';
 import { CACHE_KEY, CACHE_TTL, cached } from '../../services/cache';
-import {
-  type InterpreterSample,
-  getInterpreterEnrichment,
-} from './interpreters.enrichment';
-import { interpreters } from './interpreters.schema';
+import { interpreters, type InterpreterSampleRow } from './interpreters.schema';
 
 export type InterpreterResponse = {
   id: string;
@@ -19,7 +15,7 @@ export type InterpreterResponse = {
   reviews: number;
   styles: string[];
   story: string | null;
-  samples: InterpreterSample[];
+  samples: InterpreterSampleRow[];
 };
 
 const interpreterResponseFields = {
@@ -29,6 +25,11 @@ const interpreterResponseFields = {
   imageUrl: interpreters.imageUrl,
   isPremium: interpreters.isPremium,
   sortOrder: interpreters.sortOrder,
+  rating: interpreters.rating,
+  reviews: interpreters.reviews,
+  styles: interpreters.styles,
+  story: interpreters.story,
+  samples: interpreters.samples,
 };
 
 function serializeInterpreter(row: {
@@ -38,8 +39,12 @@ function serializeInterpreter(row: {
   imageUrl: string | null;
   isPremium: boolean;
   sortOrder: number;
+  rating: string | null;
+  reviews: number;
+  styles: string[] | null;
+  story: string | null;
+  samples: InterpreterSampleRow[] | null;
 }): InterpreterResponse {
-  const enrichment = getInterpreterEnrichment(row.id);
   return {
     id: row.id,
     name: row.name,
@@ -47,18 +52,18 @@ function serializeInterpreter(row: {
     image_url: row.imageUrl,
     is_premium: row.isPremium,
     sort_order: row.sortOrder,
-    rating: enrichment.rating,
-    reviews: enrichment.reviews,
-    styles: enrichment.styles,
-    story: enrichment.story,
-    samples: enrichment.samples,
+    rating: row.rating !== null ? Number(row.rating) : null,
+    reviews: row.reviews,
+    styles: row.styles ?? [],
+    story: row.story,
+    samples: row.samples ?? [],
   };
 }
 
 export const interpretersService = {
   async listActiveInterpreters(): Promise<InterpreterResponse[]> {
-    // Read-heavy + static dataset → read-through cache (no write endpoints, so
-    // TTL is the refresh mechanism; a re-seed shows up within CACHE_TTL).
+    // Read-heavy, rarely changes → read-through cache. On enrichment edits,
+    // re-seed/invalidate `CACHE_KEY.interpreters`.
     return cached(`${CACHE_KEY.interpreters}:list`, { ttlSeconds: CACHE_TTL.INTERPRETERS }, async () => {
       const rows = await db
         .select(interpreterResponseFields)

@@ -23,8 +23,8 @@ import { REDIS_NS, getRedis, redisKey } from './redis';
  * staleness ceilings, not the primary freshness mechanism.
  */
 export const CACHE_TTL = {
-  /** Symbols / themes / categories — static reference data. */
-  DICTIONARY: 24 * 60 * 60, // 24h
+  /** Symbols / themes / categories — rarely changes; invalidated on edit/seed. */
+  DICTIONARY: 7 * 24 * 60 * 60, // 1 week
   /** Interpreter directory + enrichment — semi-static. */
   INTERPRETERS: 60 * 60, // 1h
   /** Yenilikler editorial feed — changes more often. */
