@@ -346,7 +346,7 @@ describe('dreamsService credit behavior', () => {
     try {
       const firstPage = await dreamsService.listDreams(user.id, { limit: 20 });
 
-      expect(Object.keys(selectArgs[0] ?? {})).toEqual(['id', 'content', 'status', 'createdAt']);
+      expect(Object.keys(selectArgs[0] ?? {})).toEqual(['id', 'content', 'status', 'isBookmarked', 'createdAt']);
       expect(firstPage.items).toHaveLength(20);
       expect(firstPage.nextCursor).toEqual(expect.any(String));
       expect(firstPage.items[0]).toEqual(
@@ -369,7 +369,7 @@ describe('dreamsService credit behavior', () => {
       });
 
       expect(selectArgs).toHaveLength(2);
-      expect(Object.keys(selectArgs[1] ?? {})).toEqual(['id', 'content', 'status', 'createdAt']);
+      expect(Object.keys(selectArgs[1] ?? {})).toEqual(['id', 'content', 'status', 'isBookmarked', 'createdAt']);
       expect(secondPage.items).toHaveLength(5);
       expect(secondPage.nextCursor).toBeNull();
       expect(secondPage.items.map((dream) => dream.id)).toEqual([
@@ -380,7 +380,7 @@ describe('dreamsService credit behavior', () => {
         userDreams[0]!.id,
       ]);
       expect(secondPage.items.every((dream) => dream.content.startsWith('vitest:user-dream-'))).toBe(true);
-      expect(secondPage.items.every((dream) => Object.keys(dream).sort().join(',') === 'content,createdAt,id,status')).toBe(true);
+      expect(secondPage.items.every((dream) => Object.keys(dream).sort().join(',') === 'content,createdAt,id,isBookmarked,status')).toBe(true);
     } finally {
       selectSpy.mockRestore();
     }

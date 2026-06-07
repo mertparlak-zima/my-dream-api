@@ -54,6 +54,7 @@ type DreamFixtureInput = {
   status?: (typeof DREAM_STATUS)[keyof typeof DREAM_STATUS];
   userRating?: number | null;
   userFeedbackText?: string | null;
+  isBookmarked?: boolean;
 };
 
 type CreditFixtureInput = {
@@ -181,6 +182,7 @@ export async function createDreamFixture(input: DreamFixtureInput) {
     status: input.status ?? DREAM_STATUS.PENDING,
     userRating: input.userRating ?? null,
     userFeedbackText: input.userFeedbackText ?? null,
+    isBookmarked: input.isBookmarked ?? false,
     updatedAt: now,
   });
 

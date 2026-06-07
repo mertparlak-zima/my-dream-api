@@ -121,6 +121,7 @@ const DreamSchema = z
     mood: z.null().openapi({ example: null }),
     rating: z.number().int().min(DREAM_CONFIG.MIN_RATING).max(DREAM_CONFIG.MAX_RATING).nullable().openapi({ example: 8 }),
     feedback: z.string().nullable().openapi({ example: 'Yorum faydaliydi.' }),
+    isBookmarked: z.boolean().openapi({ example: false }),
     createdAt: IsoDateSchema,
     updatedAt: IsoDateSchema,
   })
@@ -131,6 +132,7 @@ const DreamListItemSchema = z
     id: UuidSchema,
     content: z.string().openapi({ example: 'Uzun bir koridorda yuruyordum ve deniz sesi duyuyordum.' }),
     status: DreamStatusSchema,
+    isBookmarked: z.boolean().openapi({ example: false }),
     createdAt: IsoDateSchema,
   })
   .openapi('DreamListItem');
@@ -166,6 +168,13 @@ const ListDreamsQuerySchema = z.object({
     },
     example: null,
   }),
+  bookmarked: z.enum(['true', 'false']).optional().openapi({
+    param: {
+      name: 'bookmarked',
+      in: 'query',
+    },
+    example: 'true',
+  }),
 });
 
 const SubmitFeedbackRequestSchema = z
@@ -174,6 +183,12 @@ const SubmitFeedbackRequestSchema = z
     feedback_text: z.string().max(DREAM_CONFIG.MAX_FEEDBACK_LENGTH).optional().openapi({ example: 'Yorum faydaliydi.' }),
   })
   .openapi('SubmitFeedbackRequest');
+
+const SetBookmarkRequestSchema = z
+  .object({
+    bookmarked: z.boolean().openapi({ example: true }),
+  })
+  .openapi('SetBookmarkRequest');
 
 const UserEnvelopeSchema = z.object({ success: z.literal(true), data: UserSchema }).openapi('UserEnvelope');
 const CreditEnvelopeSchema = z.object({ success: z.literal(true), data: CreditSummarySchema }).openapi('CreditEnvelope');
@@ -466,6 +481,58 @@ const routes: RouteConfig[] = [
     responses: {
       200: {
         description: 'Owned dream detail.',
+        content: {
+          'application/json': {
+            schema: DreamEnvelopeSchema,
+          },
+        },
+      },
+      400: {
+        description: 'Validation error.',
+        content: {
+          'application/json': {
+            schema: ErrorEnvelopeSchema,
+          },
+        },
+      },
+      401: {
+        description: 'Missing or invalid authentication.',
+        content: {
+          'application/json': {
+            schema: ErrorEnvelopeSchema,
+          },
+        },
+      },
+      404: {
+        description: 'Dream not found or not owned by user.',
+        content: {
+          'application/json': {
+            schema: ErrorEnvelopeSchema,
+          },
+        },
+      },
+    },
+  },
+  {
+    method: 'patch',
+    path: '/dreams/{id}/bookmark',
+    tags: ['Dreams'],
+    summary: 'Set or clear the bookmark flag on a dream',
+    security: bearerSecurity,
+    request: {
+      params: DreamIdParamSchema,
+      body: {
+        required: true,
+        content: {
+          'application/json': {
+            schema: SetBookmarkRequestSchema,
+          },
+        },
+      },
+    },
+    responses: {
+      200: {
+        description: 'Updated dream with the new bookmark state.',
         content: {
           'application/json': {
             schema: DreamEnvelopeSchema,

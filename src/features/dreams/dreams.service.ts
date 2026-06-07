@@ -17,7 +17,12 @@ import { interpreters } from '../interpreters/interpreters.schema';
 import { users } from '../users/users.schema';
 import { scheduleDreamProcessing } from './dreams.processor';
 import { dreams } from './dreams.schema';
-import type { CreateDreamInput, ListDreamsQuery, SubmitDreamFeedbackInput } from './dreams.schemas';
+import type {
+  CreateDreamInput,
+  ListDreamsQuery,
+  SetBookmarkInput,
+  SubmitDreamFeedbackInput,
+} from './dreams.schemas';
 
 type InterpreterSummary = {
   id: string;
@@ -43,12 +48,14 @@ export type DreamResponse = DreamBase & {
   mood: null;
   rating: number | null;
   feedback: string | null;
+  isBookmarked: boolean;
 };
 
 export type DreamListItem = {
   id: string;
   content: string;
   status: DreamStatus;
+  isBookmarked: boolean;
   createdAt: string;
 };
 
@@ -64,6 +71,7 @@ type DreamDetailRow = {
   interpretation: string | null;
   userRating: number | null;
   userFeedbackText: string | null;
+  isBookmarked: boolean;
   createdAt: Date;
   updatedAt: Date;
   interpreterId: string;
@@ -78,6 +86,7 @@ type DreamListRow = {
   id: string;
   content: string;
   status: DreamStatus;
+  isBookmarked: boolean;
   createdAt: Date;
 };
 
@@ -106,6 +115,7 @@ function serializeDream(row: DreamDetailRow): DreamResponse {
     mood: null,
     rating: row.userRating,
     feedback: row.userFeedbackText,
+    isBookmarked: row.isBookmarked,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };
@@ -116,6 +126,7 @@ function serializeDreamListItem(row: DreamListRow): DreamListItem {
     id: row.id,
     content: row.content,
     status: row.status,
+    isBookmarked: row.isBookmarked,
     createdAt: row.createdAt.toISOString(),
   };
 }
@@ -127,6 +138,7 @@ function dreamDetailSelectFields(): {
   interpretation: typeof dreams.interpretation;
   userRating: typeof dreams.userRating;
   userFeedbackText: typeof dreams.userFeedbackText;
+  isBookmarked: typeof dreams.isBookmarked;
   createdAt: typeof dreams.createdAt;
   updatedAt: typeof dreams.updatedAt;
   interpreterId: typeof interpreters.id;
@@ -143,6 +155,7 @@ function dreamDetailSelectFields(): {
     interpretation: dreams.interpretation,
     userRating: dreams.userRating,
     userFeedbackText: dreams.userFeedbackText,
+    isBookmarked: dreams.isBookmarked,
     createdAt: dreams.createdAt,
     updatedAt: dreams.updatedAt,
     interpreterId: interpreters.id,
@@ -158,12 +171,14 @@ function dreamListSelectFields(): {
   id: typeof dreams.id;
   content: typeof dreams.content;
   status: typeof dreams.status;
+  isBookmarked: typeof dreams.isBookmarked;
   createdAt: typeof dreams.createdAt;
 } {
   return {
     id: dreams.id,
     content: dreams.content,
     status: dreams.status,
+    isBookmarked: dreams.isBookmarked,
     createdAt: dreams.createdAt,
   };
 }
@@ -311,6 +326,7 @@ export const dreamsService = {
           interpretation: dreams.interpretation,
           userRating: dreams.userRating,
           userFeedbackText: dreams.userFeedbackText,
+          isBookmarked: dreams.isBookmarked,
           createdAt: dreams.createdAt,
           updatedAt: dreams.updatedAt,
           interpreterId: dreams.interpreterId,
@@ -330,6 +346,7 @@ export const dreamsService = {
         interpretation: createdDream.interpretation,
         userRating: createdDream.userRating,
         userFeedbackText: createdDream.userFeedbackText,
+        isBookmarked: createdDream.isBookmarked,
         createdAt: createdDream.createdAt,
         updatedAt: createdDream.updatedAt,
         interpreterId: interpreter.id,
@@ -350,9 +367,50 @@ export const dreamsService = {
     return serializeDream(await findOwnedDream(userId, dreamId));
   },
 
+  async setBookmark(userId: string, dreamId: string, input: SetBookmarkInput): Promise<DreamResponse> {
+    const [updatedDream] = await db
+      .update(dreams)
+      .set({ isBookmarked: input.bookmarked, updatedAt: new Date() })
+      .from(interpreters)
+      .where(
+        and(
+          eq(dreams.id, dreamId),
+          eq(dreams.userId, userId),
+          eq(dreams.interpreterId, interpreters.id),
+        ),
+      )
+      .returning({
+        id: dreams.id,
+        content: dreams.content,
+        status: dreams.status,
+        interpretation: dreams.interpretation,
+        userRating: dreams.userRating,
+        userFeedbackText: dreams.userFeedbackText,
+        isBookmarked: dreams.isBookmarked,
+        createdAt: dreams.createdAt,
+        updatedAt: dreams.updatedAt,
+        interpreterId: interpreters.id,
+        interpreterName: interpreters.name,
+        interpreterDescription: interpreters.description,
+        interpreterImageUrl: interpreters.imageUrl,
+        interpreterIsPremium: interpreters.isPremium,
+        interpreterSortOrder: interpreters.sortOrder,
+      });
+
+    if (!updatedDream) {
+      throw new NotFoundError('Ruya bulunamadi.');
+    }
+
+    return serializeDream(updatedDream);
+  },
+
   async listDreams(userId: string, query: ListDreamsQuery): Promise<DreamListResponse> {
     const cursor = query.cursor ? decodeDreamCursor(query.cursor) : null;
     const whereConditions = [eq(dreams.userId, userId)];
+
+    if (query.bookmarked !== undefined) {
+      whereConditions.push(eq(dreams.isBookmarked, query.bookmarked === 'true'));
+    }
 
     if (cursor) {
       const cursorCondition = or(
@@ -405,6 +463,7 @@ export const dreamsService = {
         interpretation: dreams.interpretation,
         userRating: dreams.userRating,
         userFeedbackText: dreams.userFeedbackText,
+        isBookmarked: dreams.isBookmarked,
         createdAt: dreams.createdAt,
         updatedAt: dreams.updatedAt,
         interpreterId: interpreters.id,
