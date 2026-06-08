@@ -15,6 +15,8 @@ process.env.NODE_ENV = 'development';
 process.env.DEV_AUTH_ENABLED = process.env.DEV_AUTH_ENABLED ?? 'true';
 process.env.TEST_DATABASE_URL = fallbackDatabaseUrl;
 process.env.DATABASE_URL = fallbackDatabaseUrl;
+// Structured logger (#61) stays silent during the test suite.
+process.env.LOG_ENABLED = 'false';
 delete process.env.SENTRY_DSN;
 delete process.env.SENTRY_ENVIRONMENT;
 delete process.env.SENTRY_RELEASE;

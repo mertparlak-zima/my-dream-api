@@ -1,6 +1,8 @@
 import { z } from 'zod';
 
 const NODE_ENV_VALUES = ['development', 'test', 'production'] as const;
+const LOG_LEVEL_VALUES = ['error', 'warn', 'info', 'http', 'debug'] as const;
+const LOG_FORMAT_VALUES = ['json', 'pretty'] as const;
 
 function trimTrailingSlash(value: string): string {
   return value.replace(/\/+$/, '');
@@ -62,6 +64,12 @@ const rawEnvSchema = z.object({
     emptyToUndefined,
     z.enum(['true', 'false']).default('false').transform((value) => value === 'true'),
   ),
+  LOG_LEVEL: z.preprocess(emptyToUndefined, z.enum(LOG_LEVEL_VALUES).optional()),
+  LOG_FORMAT: z.preprocess(emptyToUndefined, z.enum(LOG_FORMAT_VALUES).optional()),
+  LOG_ENABLED: z.preprocess(
+    emptyToUndefined,
+    z.enum(['true', 'false']).optional().transform((value) => (value === undefined ? undefined : value === 'true')),
+  ),
 });
 
 const productionEnvSchema = rawEnvSchema.superRefine((env, ctx) => {
@@ -108,6 +116,9 @@ export type RuntimeEnv = z.infer<typeof productionEnvSchema> & {
   SENTRY_ENVIRONMENT: string;
   SENTRY_TRACES_SAMPLE_RATE: number;
   DEV_AUTH_ENABLED: boolean;
+  LOG_LEVEL: (typeof LOG_LEVEL_VALUES)[number];
+  LOG_FORMAT: (typeof LOG_FORMAT_VALUES)[number];
+  LOG_ENABLED: boolean;
 };
 
 function deriveSupabaseAuthEnv(env: z.infer<typeof productionEnvSchema>): RuntimeEnv {
@@ -121,6 +132,9 @@ function deriveSupabaseAuthEnv(env: z.infer<typeof productionEnvSchema>): Runtim
     SENTRY_ENVIRONMENT: env.SENTRY_ENVIRONMENT ?? env.NODE_ENV,
     SENTRY_TRACES_SAMPLE_RATE: env.SENTRY_TRACES_SAMPLE_RATE ?? (env.NODE_ENV === 'production' ? 0.1 : 1),
     DEV_AUTH_ENABLED: (env.NODE_ENV === 'development' || env.NODE_ENV === 'test') && env.DEV_AUTH_ENABLED,
+    LOG_LEVEL: env.LOG_LEVEL ?? (env.NODE_ENV === 'production' ? 'info' : 'debug'),
+    LOG_FORMAT: env.LOG_FORMAT ?? (env.NODE_ENV === 'production' ? 'json' : 'pretty'),
+    LOG_ENABLED: env.LOG_ENABLED ?? true,
   };
 }
 

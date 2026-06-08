@@ -12,6 +12,7 @@ import { ForbiddenError } from '../../errors/ForbiddenError';
 import { NotFoundError } from '../../errors/NotFoundError';
 import { ValidationError } from '../../errors/ValidationError';
 import { getNextWeeklyResetDate } from '../../utils/date';
+import { logger } from '../../utils/logger';
 import { creditTransactions } from '../credits/credits.schema';
 import { interpreters } from '../interpreters/interpreters.schema';
 import { users } from '../users/users.schema';
@@ -305,6 +306,7 @@ export const dreamsService = {
           .returning({ id: users.id });
 
         if (!extraSpend) {
+          logger.warn('credit spend failed: insufficient', { op: 'credit.spend', userId });
           throw new CreditError();
         }
 
@@ -359,6 +361,7 @@ export const dreamsService = {
     });
 
     scheduleDreamProcessing(dream.id);
+    logger.info('dream created', { op: 'dream.create', userId, dreamId: dream.id });
 
     return serializeDream(dream);
   },

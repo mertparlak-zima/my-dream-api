@@ -54,7 +54,8 @@ function shouldRedactKey(key: string): boolean {
   return SENSITIVE_KEY_PATTERN.test(key) || PRIVATE_PAYLOAD_KEY_PATTERN.test(key);
 }
 
-function scrubValue(value: unknown): unknown {
+/** Recursively redacts secrets/PII; shared with the structured logger (#61). */
+export function scrubValue(value: unknown): unknown {
   if (typeof value === 'string') {
     return SENSITIVE_TEXT_PATTERN.test(value) ? REDACTED : value;
   }

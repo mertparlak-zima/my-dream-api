@@ -1,3 +1,4 @@
+import { logger } from '../utils/logger';
 import { METRIC, incrementMetric } from '../utils/metrics';
 import { REDIS_NS, getRedis, redisKey } from './redis';
 
@@ -76,6 +77,7 @@ export async function cached<T>(
       const hit = await client.get(fullKey);
       if (hit !== null) {
         incrementMetric(METRIC.cacheHit);
+        logger.debug('cache hit', { op: 'cache', key: fullKey });
         return JSON.parse(hit) as T;
       }
     } catch {
@@ -87,6 +89,7 @@ export async function cached<T>(
 
   if (client) {
     incrementMetric(METRIC.cacheMiss);
+    logger.debug('cache miss', { op: 'cache', key: fullKey });
     if (value !== undefined) {
       try {
         await client.set(
@@ -112,6 +115,7 @@ export async function invalidate(key: string): Promise<void> {
   }
   try {
     await client.del(redisKey(REDIS_NS.cache, key));
+    logger.debug('cache invalidated', { op: 'cache', key });
   } catch {
     // Best-effort invalidation.
   }
@@ -131,6 +135,7 @@ export async function invalidatePrefix(prefix: string): Promise<void> {
       cursor = next;
       if (keys.length > 0) {
         await client.del(...keys);
+        logger.debug('cache invalidated', { op: 'cache', prefix, count: keys.length });
       }
     } while (cursor !== '0');
   } catch {

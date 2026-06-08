@@ -24,6 +24,8 @@ export default defineConfig({
         'src/middlewares/errorHandler.ts',
         'src/middlewares/idempotencyMiddleware.ts',
         'src/middlewares/rateLimitMiddleware.ts',
+        'src/middlewares/requestLogger.ts',
+        'src/utils/logger.ts',
         'src/features/dreams/dreams.service.ts',
         'src/features/dreams/dreams.processor.ts',
         'src/features/credits/credits.service.ts',

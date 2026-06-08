@@ -5,6 +5,7 @@ import { createHash } from 'node:crypto';
 
 import { AppError } from '../errors/AppError';
 import { ConflictError } from '../errors/ConflictError';
+import { logger } from '../utils/logger';
 import { METRIC, incrementMetric } from '../utils/metrics';
 import { REDIS_NS, getReadyRedis, redisKey } from '../services/redis';
 
@@ -81,6 +82,7 @@ export function createIdempotencyMiddleware(options: IdempotencyOptions = {}): M
     if (acquired !== 'OK') {
       const existing = await client.get(key);
       if (existing === null || existing === PENDING) {
+        logger.warn('idempotency in progress', { op: 'idempotency', key });
         throw new ConflictError(
           'Aynı istek hâlâ işleniyor. Birazdan tekrar dene.',
           'IDEMPOTENCY_IN_PROGRESS',
@@ -88,12 +90,14 @@ export function createIdempotencyMiddleware(options: IdempotencyOptions = {}): M
       }
       const record = JSON.parse(existing) as StoredRecord;
       if (record.fingerprint !== fp) {
+        logger.warn('idempotency key reused', { op: 'idempotency', key });
         throw new ConflictError(
           'Bu Idempotency-Key farklı bir istek için kullanılmış.',
           'IDEMPOTENCY_KEY_REUSED',
         );
       }
       incrementMetric(METRIC.idempotencyReplayed);
+      logger.info('idempotency replay', { op: 'idempotency', key });
       c.header('Idempotent-Replayed', 'true');
       c.res = c.newResponse(record.body, record.status as ContentfulStatusCode, {
         'Content-Type': record.contentType,

@@ -37,6 +37,7 @@
     "ioredis": "5.11.1",
     "jose": "6.2.3",
     "postgres": "3.4.9",
+    "winston": "3.19.0",
     "zod": "4.4.3"
   },
   "devDependencies": {

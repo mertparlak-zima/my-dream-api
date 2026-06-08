@@ -1,6 +1,7 @@
 import { Redis } from 'ioredis';
 
 import { REDIS_URL } from '../config';
+import { logger } from '../utils/logger';
 import { addSentryBreadcrumb } from '../utils/sentry';
 
 /**
@@ -66,12 +67,15 @@ function createClient(url: string): Redis {
     retryStrategy: (times: number): number => Math.min(times * 200, 2000),
   });
   for (const event of ['connect', 'ready', 'end'] as const) {
-    redis.on(event, () => addSentryBreadcrumb('redis', `redis ${event}`, {}, 'info'));
+    redis.on(event, () => {
+      logger.debug(`redis ${event}`, { op: 'redis' });
+      addSentryBreadcrumb('redis', `redis ${event}`, {}, 'info');
+    });
   }
   redis.on('error', (error: Error) => {
     // Keep the process alive on transient Redis errors; features degrade rather
     // than crash. Log the message only (never the URL/credentials).
-    console.error('[redis] connection error:', error.message);
+    logger.error('redis error', { op: 'redis', message: error.message });
     addSentryBreadcrumb('redis', 'redis error', { message: error.message }, 'error');
   });
   registerShutdownHandlers();

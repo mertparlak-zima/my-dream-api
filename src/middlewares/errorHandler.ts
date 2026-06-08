@@ -2,6 +2,7 @@ import type { Context } from 'hono';
 import { ZodError } from 'zod';
 import { AppError } from '../errors/AppError';
 import { IS_DEV } from '../config';
+import { logger, serializeError } from '../utils/logger';
 import { captureUnexpectedError } from '../utils/sentry';
 
 export function errorHandler(err: Error, c: Context): Response {
@@ -32,7 +33,8 @@ export function errorHandler(err: Error, c: Context): Response {
     );
   }
 
-  console.error('[UNHANDLED_ERROR]', err);
+  // requestId/userId are attached via the request-scoped log context (#61).
+  logger.error('unhandled error', { op: 'http', err: serializeError(err) });
   captureUnexpectedError(err, c);
 
   return c.json(

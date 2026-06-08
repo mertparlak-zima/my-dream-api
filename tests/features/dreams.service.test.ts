@@ -11,6 +11,7 @@ import { creditTransactions, dreams, users } from '../../src/db/schema';
 import { processDream } from '../../src/features/dreams/dreams.processor';
 import { dreamsService } from '../../src/features/dreams/dreams.service';
 import { getNextWeeklyResetDate } from '../../src/utils/date';
+import { logger } from '../../src/utils/logger';
 import {
   createDreamFixture,
   createInterpreterFixture,
@@ -925,7 +926,7 @@ describe('dreamsService credit behavior', () => {
   it('logs background worker errors when scheduled processing rejects', async () => {
     vi.useFakeTimers();
 
-    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const logErrorSpy = vi.spyOn(logger, 'error');
     vi.spyOn(db, 'update').mockImplementationOnce(() => {
       throw new Error('vitest: scheduled processing failed');
     });
@@ -933,16 +934,19 @@ describe('dreamsService credit behavior', () => {
     scheduleDreamProcessing(crypto.randomUUID());
     await vi.advanceTimersByTimeAsync(300);
 
-    expect(consoleErrorSpy).toHaveBeenCalledWith(
-      '[DREAM_WORKER_ERROR]',
-      expect.objectContaining({ message: 'vitest: scheduled processing failed' }),
+    expect(logErrorSpy).toHaveBeenCalledWith(
+      'dream worker failed',
+      expect.objectContaining({
+        op: 'dream.worker',
+        err: expect.objectContaining({ message: 'vitest: scheduled processing failed' }),
+      }),
     );
   });
 
   it('normalizes non-Error scheduled processing rejections', async () => {
     vi.useFakeTimers();
 
-    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const logErrorSpy = vi.spyOn(logger, 'error');
     vi.spyOn(db, 'update').mockImplementationOnce(() => {
       throw new String('vitest: scheduled plain failure');
     });
@@ -950,9 +954,12 @@ describe('dreamsService credit behavior', () => {
     scheduleDreamProcessing(crypto.randomUUID());
     await vi.advanceTimersByTimeAsync(300);
 
-    expect(consoleErrorSpy).toHaveBeenCalledWith(
-      '[DREAM_WORKER_ERROR]',
-      new String('vitest: scheduled plain failure'),
+    expect(logErrorSpy).toHaveBeenCalledWith(
+      'dream worker failed',
+      expect.objectContaining({
+        op: 'dream.worker',
+        err: expect.objectContaining({ name: 'NonError', message: 'vitest: scheduled plain failure' }),
+      }),
     );
   });
 

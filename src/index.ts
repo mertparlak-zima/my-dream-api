@@ -12,6 +12,7 @@ import { NotFoundError } from './errors/NotFoundError';
 import { usersRoutes } from './features/users/users.controller';
 import { errorHandler } from './middlewares/errorHandler';
 import { createRateLimitMiddleware } from './middlewares/rateLimitMiddleware';
+import { requestLogger } from './middlewares/requestLogger';
 import { registerOpenApi } from './openapi/register';
 import { redisPing } from './services/redis';
 import { captureDebugSentryEvent, initSentry, isSentryEnabled } from './utils/sentry';
@@ -23,6 +24,7 @@ const app = new OpenAPIHono();
 app.onError(errorHandler);
 app.notFound((c) => errorHandler(new NotFoundError(), c));
 
+app.use('*', requestLogger);
 app.use(
   '*',
   cors({

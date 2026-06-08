@@ -42,6 +42,12 @@ export const SENTRY_CONFIG = {
   TRACES_SAMPLE_RATE: runtimeEnv.SENTRY_TRACES_SAMPLE_RATE,
 } as const;
 
+export const LOG_CONFIG = {
+  LEVEL: runtimeEnv.LOG_LEVEL,
+  FORMAT: runtimeEnv.LOG_FORMAT,
+  ENABLED: runtimeEnv.LOG_ENABLED,
+} as const;
+
 export const DREAM_CONFIG = {
   MIN_CONTENT_LENGTH: 10,
   MAX_CONTENT_LENGTH: 6000,

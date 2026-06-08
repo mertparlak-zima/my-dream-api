@@ -3,6 +3,7 @@ import type { Context, MiddlewareHandler } from 'hono';
 import { isIP } from 'node:net';
 import { IS_DEV, IS_TEST, RATE_LIMIT_CONFIG } from '../config';
 import { RateLimitError } from '../errors/RateLimitError';
+import { logger } from '../utils/logger';
 import { METRIC, incrementMetric } from '../utils/metrics';
 import { REDIS_NS, getReadyRedis, redisKey } from '../services/redis';
 
@@ -187,6 +188,7 @@ export function createRateLimitMiddleware(options: RateLimitOptions = {}): Middl
     if (result.limited) {
       c.header('Retry-After', String(result.resetSeconds));
       incrementMetric(METRIC.rateLimitBlocked);
+      logger.warn('rate limit exceeded', { op: 'rateLimit', key: bucketKey, resetSeconds: result.resetSeconds });
       throw new RateLimitError();
     }
 
