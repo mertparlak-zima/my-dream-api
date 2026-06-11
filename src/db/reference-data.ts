@@ -32,6 +32,8 @@ export type ReferenceInterpreter = {
   imageUrl: string | null;
   isPremium: boolean;
   sortOrder: number;
+  tag: string;
+  accentColor: string;
   rating: string;
   reviews: number;
   styles: string[];
@@ -48,6 +50,8 @@ export const REFERENCE_INTERPRETERS: ReferenceInterpreter[] = [
     imageUrl: null,
     isPremium: false,
     sortOrder: 10,
+    tag: 'Psikolojik bakış',
+    accentColor: '#234E83',
     rating: '4.7',
     reviews: 980,
     styles: ['Gerçekçi', 'Analitik', 'Sakin'],
@@ -66,6 +70,8 @@ export const REFERENCE_INTERPRETERS: ReferenceInterpreter[] = [
     imageUrl: null,
     isPremium: false,
     sortOrder: 20,
+    tag: 'Geleneksel & manevi',
+    accentColor: '#386A65',
     rating: '4.8',
     reviews: 1240,
     styles: ['Geleneksel', 'Sıcak', 'Manevi'],
@@ -84,6 +90,8 @@ export const REFERENCE_INTERPRETERS: ReferenceInterpreter[] = [
     imageUrl: null,
     isPremium: true,
     sortOrder: 30,
+    tag: 'Astrolojik',
+    accentColor: '#356A9E',
     rating: '4.6',
     reviews: 760,
     styles: ['Mistik', 'Detaycı', 'Astrolojik'],

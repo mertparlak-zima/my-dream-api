@@ -11,6 +11,8 @@ export type InterpreterResponse = {
   image_url: string | null;
   is_premium: boolean;
   sort_order: number;
+  tag: string;
+  accent_color: string;
   rating: number | null;
   reviews: number;
   styles: string[];
@@ -25,6 +27,8 @@ const interpreterResponseFields = {
   imageUrl: interpreters.imageUrl,
   isPremium: interpreters.isPremium,
   sortOrder: interpreters.sortOrder,
+  tag: interpreters.tag,
+  accentColor: interpreters.accentColor,
   rating: interpreters.rating,
   reviews: interpreters.reviews,
   styles: interpreters.styles,
@@ -39,6 +43,8 @@ function serializeInterpreter(row: {
   imageUrl: string | null;
   isPremium: boolean;
   sortOrder: number;
+  tag: string;
+  accentColor: string;
   rating: string | null;
   reviews: number;
   styles: string[] | null;
@@ -52,6 +58,8 @@ function serializeInterpreter(row: {
     image_url: row.imageUrl,
     is_premium: row.isPremium,
     sort_order: row.sortOrder,
+    tag: row.tag,
+    accent_color: row.accentColor,
     rating: row.rating !== null ? Number(row.rating) : null,
     reviews: row.reviews,
     styles: row.styles ?? [],

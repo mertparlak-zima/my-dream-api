@@ -156,6 +156,8 @@ describe('roadmap 0008 route contracts', () => {
           image_url: null,
           is_premium: false,
           sort_order: 5,
+          tag: 'vitest:tag',
+          accent_color: '#234E83',
         }),
       ]),
     );
@@ -201,6 +203,8 @@ describe('roadmap 0008 route contracts', () => {
         image_url: null,
         is_premium: true,
         sort_order: 9,
+        tag: 'vitest:tag',
+        accent_color: '#234E83',
         // Enrichment (#41): a fixture interpreter has no enrichment → defaults.
         rating: null,
         reviews: 0,

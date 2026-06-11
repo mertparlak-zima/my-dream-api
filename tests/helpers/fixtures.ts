@@ -44,6 +44,8 @@ type InterpreterFixtureInput = {
   isPremium?: boolean;
   isActive?: boolean;
   sortOrder?: number;
+  tag?: string;
+  accentColor?: string;
 };
 
 type DreamFixtureInput = {
@@ -149,6 +151,8 @@ export async function createInterpreterFixture(input: InterpreterFixtureInput = 
     isPremium: input.isPremium ?? false,
     isActive: input.isActive ?? true,
     sortOrder: input.sortOrder ?? 0,
+    tag: input.tag ?? `${TEST_TEXT_PREFIX}tag`,
+    accentColor: input.accentColor ?? '#234E83',
     updatedAt: now,
   });
 

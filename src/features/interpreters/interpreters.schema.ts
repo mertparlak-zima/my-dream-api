@@ -17,6 +17,10 @@ export const interpreters = pgTable(
       .references(() => aiModels.id, { onDelete: 'restrict' }),
     isActive: boolean('is_active').notNull().default(true),
     sortOrder: integer('sort_order').notNull().default(0),
+    // Per-interpreter presentation data (#67): short category tag + avatar accent
+    // color (hex). Dynamic per interpreter, served from the API (not client-derived).
+    tag: varchar('tag', { length: 80 }).notNull(),
+    accentColor: varchar('accent_color', { length: 9 }).notNull(),
     // Enrichment (#41): rating/reviews/styles/story/samples (Turkish content,
     // single-language like name/description). Nullable so non-enriched rows work.
     rating: numeric('rating', { precision: 2, scale: 1 }),
