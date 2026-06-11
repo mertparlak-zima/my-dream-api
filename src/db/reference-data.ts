@@ -109,6 +109,7 @@ export type DictionaryReferenceRow = {
   slug: string;
   icon: string;
   cat: string | null;
+  color: string | null;
   sortOrder: number;
   nameTr: string;
   taglineTr: string | null;
@@ -201,6 +202,7 @@ export function buildDictionaryRows(): DictionaryReferenceRow[] {
     slug: category.id,
     icon: category.icon,
     cat: null,
+    color: category.color,
     sortOrder: index,
     nameTr: category.label,
     taglineTr: null,
@@ -218,6 +220,7 @@ export function buildDictionaryRows(): DictionaryReferenceRow[] {
     slug: slugify(symbol.name),
     icon: symbol.icon,
     cat: symbol.cat,
+    color: null,
     sortOrder: index,
     nameTr: symbol.name,
     taglineTr: null,
@@ -235,6 +238,7 @@ export function buildDictionaryRows(): DictionaryReferenceRow[] {
     slug: slugify(theme.name),
     icon: theme.icon,
     cat: null,
+    color: theme.color,
     sortOrder: index,
     nameTr: theme.name,
     taglineTr: theme.tagline,

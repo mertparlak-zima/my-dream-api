@@ -3,9 +3,10 @@
  * through three lenses (spiritual / psych / intuitive). Moved from the app's
  * dummy dataset (`my-dream-app/src/data/dream-dictionary.ts`) to the backend.
  *
- * Content only: `icon` and `cat` are semantic strings; display colors stay
- * app-side presentation. Static config for now (no DB); a DB/admin-editable
- * source can replace this without changing the API contract.
+ * `icon`/`cat` are semantic strings; `color` (categories + themes) is the
+ * display accent served by the API (#68) — symbols inherit their category color
+ * client-side. Static config for now (no DB); a DB/admin-editable source can
+ * replace this without changing the API contract.
  *
  * Roadmap: project-docs `0016-de-dummy-backend-integration.md` · issue #42.
  */
@@ -16,6 +17,8 @@ export type DictCategory = {
   id: DictCategoryId;
   label: string;
   icon: string;
+  /** Display accent color (hex). */
+  color: string;
 };
 
 export type DreamLenses = {
@@ -39,15 +42,17 @@ export type DreamTheme = DreamLenses & {
   tagline: string;
   brief: string;
   related: string[];
+  /** Display accent color (hex). */
+  color: string;
 };
 
 export const DICT_CATEGORIES: DictCategory[] = [
-  { id: 'su', label: 'Su', icon: 'waves' },
-  { id: 'hayvan', label: 'Hayvanlar', icon: 'bird' },
-  { id: 'insan', label: 'İnsanlar', icon: 'user-circle' },
-  { id: 'yer', label: 'Yerler', icon: 'house' },
-  { id: 'gok', label: 'Gök & Doğa', icon: 'moon-stars' },
-  { id: 'esya', label: 'Eşyalar', icon: 'key' },
+  { id: 'su', label: 'Su', icon: 'waves', color: '#386A65' },
+  { id: 'hayvan', label: 'Hayvanlar', icon: 'bird', color: '#C99A5E' },
+  { id: 'insan', label: 'İnsanlar', icon: 'user-circle', color: '#234E83' },
+  { id: 'yer', label: 'Yerler', icon: 'house', color: '#A94E2D' },
+  { id: 'gok', label: 'Gök & Doğa', icon: 'moon-stars', color: '#C2902F' },
+  { id: 'esya', label: 'Eşyalar', icon: 'key', color: '#2D5450' },
 ];
 
 export const DICT_SYMBOLS: DreamSymbol[] = [
@@ -220,7 +225,7 @@ export const DICT_THEMES: DreamTheme[] = [
     spiritual: 'Eski tabirde kötü rüyalar çoğu zaman geçici sıkıntılara işaret eder ve anlatılınca hayra döner; bu yüzden “hayırdır inşallah” denir.',
     psych: 'Kabuslar genellikle gündüz bastırılan stres, kaygı ya da çözülmemiş bir gerilimin gece dışa vurmasıdır.',
     intuitive: 'Karanlık bir rüya bile sana bir şey öğretmek ister; korkunun altında çoğu zaman bir ihtiyaç saklıdır.',
-    related: ['Yılan', 'Düşmek', 'Kovalanmak'],
+    related: ['Yılan', 'Düşmek', 'Kovalanmak'], color: '#A94E2D',
   },
   {
     name: 'Kayıp diş', icon: 'tooth', tagline: 'En sık görülen rüyalardan.',
@@ -228,7 +233,7 @@ export const DICT_THEMES: DreamTheme[] = [
     spiritual: 'Diş düşmesi tabirde çoğu zaman bir haberle ilişkilendirilir; sağlam dişler ise güçlü aile bağlarını gösterir.',
     psych: 'Diş kaybı rüyaları çok yaygındır ve genellikle bir kontrol kaygısı ya da yaşanan bir değişimle bağlantılıdır.',
     intuitive: 'Bir diş düşer ki yenisi gelsin; bu rüya bir şeyin sonunun yeni bir başlangıç olduğunu fısıldar.',
-    related: ['Diş', 'Yabancı', 'Kabuslar'],
+    related: ['Diş', 'Yabancı', 'Kabuslar'], color: '#234E83',
   },
   {
     name: 'Uçmak', icon: 'bird', tagline: 'Özgürlük mü, kaçış mı?',
@@ -236,7 +241,7 @@ export const DICT_THEMES: DreamTheme[] = [
     spiritual: 'Uçmak çoğu tabirde mertebenin yükselmesine, bir işte muvaffak olmaya işaret eder.',
     psych: 'Uçmak, bir baskıdan kurtulma ya da hayatına yukarıdan, geniş bir perspektifle bakma arzusunu yansıtabilir.',
     intuitive: 'Kanatların olmadan uçuyorsan bile, bu rüya sana “yapabilirsin” diyor.',
-    related: ['Kuş', 'Ay', 'Düşmek'],
+    related: ['Kuş', 'Ay', 'Düşmek'], color: '#386A65',
   },
   {
     name: 'Düşmek', icon: 'mountain', tagline: 'Kontrol ve güven duygusu.',
@@ -244,7 +249,7 @@ export const DICT_THEMES: DreamTheme[] = [
     spiritual: 'Yüksekten düşmek tabirde çoğu zaman bir hevesin değişmesine işaret eder, dikkatli olmayı öğütler.',
     psych: 'Düşme rüyaları, bir şeyi kontrol edemediğin ya da bir desteğe ihtiyaç duyduğun dönemlerde sık görülür.',
     intuitive: 'Düşerken uyanmak, aslında tutunduğun şeyi gözden geçirme vaktinin geldiğini söyler.',
-    related: ['Kabuslar', 'Köprü', 'Deniz'],
+    related: ['Kabuslar', 'Köprü', 'Deniz'], color: '#C99A5E',
   },
   {
     name: 'Kovalanmak', icon: 'path', tagline: 'Neyden kaçıyorsun?',
@@ -252,7 +257,7 @@ export const DICT_THEMES: DreamTheme[] = [
     spiritual: 'Kovalanmak tabirde üzerine gelen bir sıkıntıya işaret edebilir; dönüp yüzleşmek çoğu zaman onu hayra çevirir.',
     psych: 'Seni kovalayan şey çoğu zaman dışarıdan biri değil, ertelediğin bir duygu ya da sorumluluktur.',
     intuitive: 'Bir gün dönüp baktığında, peşindeki şeyin aslında seninle konuşmak istediğini göreceksin.',
-    related: ['Kabuslar', 'Yabancı', 'Köprü'],
+    related: ['Kabuslar', 'Yabancı', 'Köprü'], color: '#356A9E',
   },
   {
     name: 'Sınav', icon: 'book-open-text', tagline: 'Kaygı ve beklentiler.',
@@ -260,6 +265,6 @@ export const DICT_THEMES: DreamTheme[] = [
     spiritual: 'İmtihan görmek tabirde bir denenme dönemine; başarmak ise hayırla çıkışa işaret eder.',
     psych: 'Sınav rüyaları genellikle kendine koyduğun yüksek beklentilerden ve değerlendirilme kaygısından beslenir.',
     intuitive: 'Bu rüya bir uyarı değil; sadece biraz nefes almaya ihtiyacın olduğunu hatırlatıyor.',
-    related: ['Yabancı', 'Ev', 'Düşmek'],
+    related: ['Yabancı', 'Ev', 'Düşmek'], color: '#2D5450',
   },
 ];

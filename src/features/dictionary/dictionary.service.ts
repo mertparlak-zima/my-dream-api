@@ -7,7 +7,7 @@ import { dictionaryEntries } from './dictionary.schema';
 
 export type DictionaryLang = 'tr' | 'en';
 
-export type DictCategory = { id: string; label: string; icon: string };
+export type DictCategory = { id: string; label: string; icon: string; color: string };
 export type DreamSymbol = {
   name: string;
   icon: string;
@@ -28,6 +28,7 @@ export type DreamTheme = {
   psych: string;
   intuitive: string;
   related: string[];
+  color: string;
 };
 
 export type DictionaryResponse = {
@@ -58,6 +59,7 @@ function entrySelection(lang: DictionaryLang) {
     slug: dictionaryEntries.slug,
     icon: dictionaryEntries.icon,
     cat: dictionaryEntries.cat,
+    color: sql<string>`coalesce(${dictionaryEntries.color}, '')`,
     related: sql<string[]>`coalesce(${dictionaryEntries.related}, '{}'::text[])`,
     name: loc(lang, dictionaryEntries.nameTr, dictionaryEntries.nameEn),
     tagline: loc(lang, dictionaryEntries.taglineTr, dictionaryEntries.taglineEn),
@@ -74,6 +76,7 @@ type EntryRow = {
   slug: string;
   icon: string;
   cat: string | null;
+  color: string;
   related: string[];
   name: string;
   tagline: string;
@@ -85,7 +88,7 @@ type EntryRow = {
 };
 
 function toCategory(row: EntryRow): DictCategory {
-  return { id: row.slug, label: row.name, icon: row.icon };
+  return { id: row.slug, label: row.name, icon: row.icon, color: row.color };
 }
 
 function toSymbol(row: EntryRow): DreamSymbol {
@@ -112,6 +115,7 @@ function toTheme(row: EntryRow): DreamTheme {
     psych: row.psych,
     intuitive: row.intuitive,
     related: row.related,
+    color: row.color,
   };
 }
 

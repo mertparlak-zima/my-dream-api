@@ -18,6 +18,9 @@ export const dictionaryEntries = pgTable(
     icon: varchar('icon', { length: 60 }).notNull(),
     // Category slug a symbol belongs to (symbols only).
     cat: varchar('cat', { length: 80 }),
+    // Display accent color (hex) for categories + themes; symbols inherit their
+    // category color client-side, so it stays null for symbols (#68).
+    color: varchar('color', { length: 9 }),
     sortOrder: integer('sort_order').notNull().default(0),
     isActive: boolean('is_active').notNull().default(true),
 
