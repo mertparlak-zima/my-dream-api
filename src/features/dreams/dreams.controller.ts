@@ -33,6 +33,12 @@ dreamsRoutes.get('/:id', zValidator('param', dreamIdParamSchema), async (c) => {
   return c.json({ success: true, data: dream });
 });
 
+dreamsRoutes.delete('/:id', zValidator('param', dreamIdParamSchema), async (c) => {
+  await dreamsService.deleteDream(getAuthUserId(c), c.req.valid('param').id);
+
+  return c.json({ success: true, data: { id: c.req.valid('param').id } });
+});
+
 dreamsRoutes.patch(
   '/:id/bookmark',
   zValidator('param', dreamIdParamSchema),

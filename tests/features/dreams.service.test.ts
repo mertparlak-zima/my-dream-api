@@ -289,11 +289,38 @@ describe('dreamsService credit behavior', () => {
         imageUrl: null,
         isPremium: false,
         sortOrder: 3,
+        accentColor: '#234E83',
       },
     });
 
     await expect(dreamsService.getDreamById(otherUser.id, dream.id)).rejects.toBeInstanceOf(NotFoundError);
     await expect(dreamsService.getDreamById(user.id, crypto.randomUUID())).rejects.toBeInstanceOf(NotFoundError);
+  });
+
+  it('deletes a dream for the owning user, nulls related transactions, and rejects foreign or missing dreams', async () => {
+    const user = await createUserFixture();
+    const otherUser = await createUserFixture();
+    const interpreter = await createInterpreterFixture();
+
+    const response = await dreamsService.createDream(user.id, {
+      content: 'vitest: dream to be deleted',
+      interpreter_id: interpreter.id,
+    });
+
+    // A foreign user cannot delete it and the dream survives.
+    await expect(dreamsService.deleteDream(otherUser.id, response.id)).rejects.toBeInstanceOf(NotFoundError);
+    expect(await getUserDreams(user.id)).toHaveLength(1);
+
+    await expect(dreamsService.deleteDream(user.id, response.id)).resolves.toBeUndefined();
+    expect(await getUserDreams(user.id)).toHaveLength(0);
+
+    // The spend transaction survives with a nulled related dream (onDelete: set null).
+    const transactions = await getUserTransactions(user.id);
+    expect(transactions).toHaveLength(1);
+    expect(transactions[0]?.relatedDreamId).toBeNull();
+
+    // A second delete (now missing) reports not found.
+    await expect(dreamsService.deleteDream(user.id, response.id)).rejects.toBeInstanceOf(NotFoundError);
   });
 
   it('lists only the current user dreams in reverse chronological order', async () => {
@@ -486,6 +513,7 @@ describe('dreamsService credit behavior', () => {
       imageUrl: null,
       isPremium: false,
       sortOrder: 7,
+      accentColor: '#234E83',
     });
 
     const storedDream = await testDb.query.dreams.findFirst({

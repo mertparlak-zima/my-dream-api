@@ -33,6 +33,7 @@ type InterpreterSummary = {
   imageUrl: string | null;
   isPremium: boolean;
   sortOrder: number;
+  accentColor: string;
 };
 
 type DreamBase = {
@@ -81,6 +82,7 @@ type DreamDetailRow = {
   interpreterImageUrl: string | null;
   interpreterIsPremium: boolean;
   interpreterSortOrder: number;
+  interpreterAccentColor: string;
 };
 
 type DreamListRow = {
@@ -112,6 +114,7 @@ function serializeDream(row: DreamDetailRow): DreamResponse {
       imageUrl: row.interpreterImageUrl,
       isPremium: row.interpreterIsPremium,
       sortOrder: row.interpreterSortOrder,
+      accentColor: row.interpreterAccentColor,
     },
     mood: null,
     rating: row.userRating,
@@ -148,6 +151,7 @@ function dreamDetailSelectFields(): {
   interpreterImageUrl: typeof interpreters.imageUrl;
   interpreterIsPremium: typeof interpreters.isPremium;
   interpreterSortOrder: typeof interpreters.sortOrder;
+  interpreterAccentColor: typeof interpreters.accentColor;
 } {
   return {
     id: dreams.id,
@@ -165,6 +169,7 @@ function dreamDetailSelectFields(): {
     interpreterImageUrl: interpreters.imageUrl,
     interpreterIsPremium: interpreters.isPremium,
     interpreterSortOrder: interpreters.sortOrder,
+    interpreterAccentColor: interpreters.accentColor,
   };
 }
 
@@ -258,6 +263,7 @@ export const dreamsService = {
           imageUrl: interpreters.imageUrl,
           isPremium: interpreters.isPremium,
           sortOrder: interpreters.sortOrder,
+          accentColor: interpreters.accentColor,
         })
         .from(interpreters)
         .where(and(eq(interpreters.id, input.interpreter_id), eq(interpreters.isActive, true)))
@@ -357,6 +363,7 @@ export const dreamsService = {
         interpreterImageUrl: interpreter.imageUrl,
         interpreterIsPremium: interpreter.isPremium,
         interpreterSortOrder: interpreter.sortOrder,
+        interpreterAccentColor: interpreter.accentColor,
       };
     });
 
@@ -368,6 +375,19 @@ export const dreamsService = {
 
   async getDreamById(userId: string, dreamId: string): Promise<DreamResponse> {
     return serializeDream(await findOwnedDream(userId, dreamId));
+  },
+
+  async deleteDream(userId: string, dreamId: string): Promise<void> {
+    const [deleted] = await db
+      .delete(dreams)
+      .where(and(eq(dreams.id, dreamId), eq(dreams.userId, userId)))
+      .returning({ id: dreams.id });
+
+    if (!deleted) {
+      throw new NotFoundError('Ruya bulunamadi.');
+    }
+
+    logger.info('dream deleted', { op: 'dream.delete', userId, dreamId });
   },
 
   async setBookmark(userId: string, dreamId: string, input: SetBookmarkInput): Promise<DreamResponse> {
@@ -398,6 +418,7 @@ export const dreamsService = {
         interpreterImageUrl: interpreters.imageUrl,
         interpreterIsPremium: interpreters.isPremium,
         interpreterSortOrder: interpreters.sortOrder,
+        interpreterAccentColor: interpreters.accentColor,
       });
 
     if (!updatedDream) {
@@ -475,6 +496,7 @@ export const dreamsService = {
         interpreterImageUrl: interpreters.imageUrl,
         interpreterIsPremium: interpreters.isPremium,
         interpreterSortOrder: interpreters.sortOrder,
+        interpreterAccentColor: interpreters.accentColor,
       });
 
     if (!updatedDream) {
