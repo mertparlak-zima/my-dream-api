@@ -330,7 +330,14 @@ describe('roadmap 0008 route contracts', () => {
     expect(json.data.items).toHaveLength(20);
     expect(json.data.nextCursor).toEqual(expect.any(String));
     expect(json.data.items.every((dream: { content: string }) => dream.content.startsWith('vitest:user-dream-'))).toBe(true);
-    expect(json.data.items.every((dream: { interpreter: unknown }) => dream.interpreter === undefined)).toBe(true);
+    // List items carry a minimal interpreter summary (id/name/accentColor) so the
+    // app can render journal-card avatars without a second lookup.
+    expect(json.data.items.every(
+      (dream: { interpreter: { id: string; name: string; accentColor: string } }) =>
+        dream.interpreter.id === interpreter.id
+        && typeof dream.interpreter.name === 'string'
+        && dream.interpreter.accentColor === '#234E83',
+    )).toBe(true);
     expect(json.data.items.every((dream: { interpretation: unknown }) => dream.interpretation === undefined)).toBe(true);
 
     const secondPage = await requestJson(`/dreams?cursor=${encodeURIComponent(json.data.nextCursor)}`, {

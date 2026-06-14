@@ -374,7 +374,10 @@ describe('dreamsService credit behavior', () => {
     try {
       const firstPage = await dreamsService.listDreams(user.id, { limit: 20 });
 
-      expect(Object.keys(selectArgs[0] ?? {})).toEqual(['id', 'content', 'status', 'isBookmarked', 'createdAt']);
+      expect(Object.keys(selectArgs[0] ?? {})).toEqual([
+        'id', 'content', 'status', 'isBookmarked', 'createdAt',
+        'interpreterId', 'interpreterName', 'interpreterAccentColor',
+      ]);
       expect(firstPage.items).toHaveLength(20);
       expect(firstPage.nextCursor).toEqual(expect.any(String));
       expect(firstPage.items[0]).toEqual(
@@ -383,10 +386,14 @@ describe('dreamsService credit behavior', () => {
           content: 'vitest:user-dream-25',
           status: DREAM_STATUS.PENDING,
           createdAt: expect.any(String),
+          interpreter: {
+            id: interpreter.id,
+            name: 'vitest: list interpreter',
+            accentColor: '#234E83',
+          },
         }),
       );
       expect(firstPage.items[0]).not.toHaveProperty('interpretation');
-      expect(firstPage.items[0]).not.toHaveProperty('interpreter');
       expect(firstPage.items[0]).not.toHaveProperty('rating');
       expect(firstPage.items[0]).not.toHaveProperty('feedback');
       expect(firstPage.items[0]).not.toHaveProperty('updatedAt');
@@ -397,7 +404,10 @@ describe('dreamsService credit behavior', () => {
       });
 
       expect(selectArgs).toHaveLength(2);
-      expect(Object.keys(selectArgs[1] ?? {})).toEqual(['id', 'content', 'status', 'isBookmarked', 'createdAt']);
+      expect(Object.keys(selectArgs[1] ?? {})).toEqual([
+        'id', 'content', 'status', 'isBookmarked', 'createdAt',
+        'interpreterId', 'interpreterName', 'interpreterAccentColor',
+      ]);
       expect(secondPage.items).toHaveLength(5);
       expect(secondPage.nextCursor).toBeNull();
       expect(secondPage.items.map((dream) => dream.id)).toEqual([
@@ -408,7 +418,8 @@ describe('dreamsService credit behavior', () => {
         userDreams[0]!.id,
       ]);
       expect(secondPage.items.every((dream) => dream.content.startsWith('vitest:user-dream-'))).toBe(true);
-      expect(secondPage.items.every((dream) => Object.keys(dream).sort().join(',') === 'content,createdAt,id,isBookmarked,status')).toBe(true);
+      expect(secondPage.items.every((dream) => Object.keys(dream).sort().join(',') === 'content,createdAt,id,interpreter,isBookmarked,status')).toBe(true);
+      expect(secondPage.items.every((dream) => dream.interpreter.id === interpreter.id)).toBe(true);
     } finally {
       selectSpy.mockRestore();
     }

@@ -53,12 +53,19 @@ export type DreamResponse = DreamBase & {
   isBookmarked: boolean;
 };
 
+type DreamListInterpreter = {
+  id: string;
+  name: string;
+  accentColor: string;
+};
+
 export type DreamListItem = {
   id: string;
   content: string;
   status: DreamStatus;
   isBookmarked: boolean;
   createdAt: string;
+  interpreter: DreamListInterpreter;
 };
 
 export type DreamListResponse = {
@@ -91,6 +98,9 @@ type DreamListRow = {
   status: DreamStatus;
   isBookmarked: boolean;
   createdAt: Date;
+  interpreterId: string;
+  interpreterName: string;
+  interpreterAccentColor: string;
 };
 
 type DreamCursor = {
@@ -132,6 +142,11 @@ function serializeDreamListItem(row: DreamListRow): DreamListItem {
     status: row.status,
     isBookmarked: row.isBookmarked,
     createdAt: row.createdAt.toISOString(),
+    interpreter: {
+      id: row.interpreterId,
+      name: row.interpreterName,
+      accentColor: row.interpreterAccentColor,
+    },
   };
 }
 
@@ -179,6 +194,9 @@ function dreamListSelectFields(): {
   status: typeof dreams.status;
   isBookmarked: typeof dreams.isBookmarked;
   createdAt: typeof dreams.createdAt;
+  interpreterId: typeof interpreters.id;
+  interpreterName: typeof interpreters.name;
+  interpreterAccentColor: typeof interpreters.accentColor;
 } {
   return {
     id: dreams.id,
@@ -186,6 +204,9 @@ function dreamListSelectFields(): {
     status: dreams.status,
     isBookmarked: dreams.isBookmarked,
     createdAt: dreams.createdAt,
+    interpreterId: interpreters.id,
+    interpreterName: interpreters.name,
+    interpreterAccentColor: interpreters.accentColor,
   };
 }
 
@@ -450,6 +471,7 @@ export const dreamsService = {
     const rows = await db
       .select(dreamListSelectFields())
       .from(dreams)
+      .innerJoin(interpreters, eq(dreams.interpreterId, interpreters.id))
       .where(and(...whereConditions))
       .orderBy(desc(dreams.createdAt), desc(dreams.id))
       .limit(query.limit + 1);
