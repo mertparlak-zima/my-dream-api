@@ -14,6 +14,12 @@ describe('assertLocalTestDatabase', () => {
     expect(() => assertLocalTestDatabase('postgres://u:p@127.0.0.1:5432/db')).not.toThrow();
   });
 
+  it('allows bare container service names and .local hosts', () => {
+    expect(() => assertLocalTestDatabase('postgres://u:p@db:5432/x')).not.toThrow();
+    expect(() => assertLocalTestDatabase('postgres://u:p@postgres:5432/x')).not.toThrow();
+    expect(() => assertLocalTestDatabase('postgres://u:p@my-mac.local:5432/x')).not.toThrow();
+  });
+
   it('refuses a non-local (prod) host', () => {
     expect(() => assertLocalTestDatabase(PROD_URL)).toThrow(/non-local database host/);
   });

@@ -44,7 +44,17 @@ export function assertLocalTestDatabase(url: string): void {
     throw new Error(`Invalid test database url: "${url}".`);
   }
 
-  if (!LOCAL_DB_HOSTS.has(host)) {
+  // Local = loopback set, a bare service name (Docker Compose `db`/`postgres`,
+  // no dot), an empty host (Unix domain socket), or an mDNS/local TLD. Real
+  // databases (Supabase, RDS, …) are dotted FQDNs and stay blocked.
+  const isLocal =
+    !host ||
+    !host.includes('.') ||
+    host.endsWith('.local') ||
+    host.endsWith('.localhost') ||
+    LOCAL_DB_HOSTS.has(host);
+
+  if (!isLocal) {
     throw new Error(
       `Refusing to run tests against non-local database host "${host}". ` +
         'cleanupTestData() deletes rows — point TEST_DATABASE_URL at a local Postgres, ' +
