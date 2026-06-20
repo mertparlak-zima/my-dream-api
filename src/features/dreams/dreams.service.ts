@@ -12,12 +12,18 @@ import { ForbiddenError } from '../../errors/ForbiddenError';
 import { NotFoundError } from '../../errors/NotFoundError';
 import { ValidationError } from '../../errors/ValidationError';
 import { getNextWeeklyResetDate } from '../../utils/date';
+import { logger } from '../../utils/logger';
 import { creditTransactions } from '../credits/credits.schema';
 import { interpreters } from '../interpreters/interpreters.schema';
 import { users } from '../users/users.schema';
 import { scheduleDreamProcessing } from './dreams.processor';
 import { dreams } from './dreams.schema';
-import type { CreateDreamInput, ListDreamsQuery, SubmitDreamFeedbackInput } from './dreams.schemas';
+import type {
+  CreateDreamInput,
+  ListDreamsQuery,
+  SetBookmarkInput,
+  SubmitDreamFeedbackInput,
+} from './dreams.schemas';
 
 type InterpreterSummary = {
   id: string;
@@ -27,6 +33,7 @@ type InterpreterSummary = {
   imageUrl: string | null;
   isPremium: boolean;
   sortOrder: number;
+  accentColor: string;
 };
 
 type DreamBase = {
@@ -43,13 +50,22 @@ export type DreamResponse = DreamBase & {
   mood: null;
   rating: number | null;
   feedback: string | null;
+  isBookmarked: boolean;
+};
+
+type DreamListInterpreter = {
+  id: string;
+  name: string;
+  accentColor: string;
 };
 
 export type DreamListItem = {
   id: string;
   content: string;
   status: DreamStatus;
+  isBookmarked: boolean;
   createdAt: string;
+  interpreter: DreamListInterpreter;
 };
 
 export type DreamListResponse = {
@@ -64,6 +80,7 @@ type DreamDetailRow = {
   interpretation: string | null;
   userRating: number | null;
   userFeedbackText: string | null;
+  isBookmarked: boolean;
   createdAt: Date;
   updatedAt: Date;
   interpreterId: string;
@@ -72,13 +89,18 @@ type DreamDetailRow = {
   interpreterImageUrl: string | null;
   interpreterIsPremium: boolean;
   interpreterSortOrder: number;
+  interpreterAccentColor: string;
 };
 
 type DreamListRow = {
   id: string;
   content: string;
   status: DreamStatus;
+  isBookmarked: boolean;
   createdAt: Date;
+  interpreterId: string;
+  interpreterName: string;
+  interpreterAccentColor: string;
 };
 
 type DreamCursor = {
@@ -102,10 +124,12 @@ function serializeDream(row: DreamDetailRow): DreamResponse {
       imageUrl: row.interpreterImageUrl,
       isPremium: row.interpreterIsPremium,
       sortOrder: row.interpreterSortOrder,
+      accentColor: row.interpreterAccentColor,
     },
     mood: null,
     rating: row.userRating,
     feedback: row.userFeedbackText,
+    isBookmarked: row.isBookmarked,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };
@@ -116,7 +140,13 @@ function serializeDreamListItem(row: DreamListRow): DreamListItem {
     id: row.id,
     content: row.content,
     status: row.status,
+    isBookmarked: row.isBookmarked,
     createdAt: row.createdAt.toISOString(),
+    interpreter: {
+      id: row.interpreterId,
+      name: row.interpreterName,
+      accentColor: row.interpreterAccentColor,
+    },
   };
 }
 
@@ -127,6 +157,7 @@ function dreamDetailSelectFields(): {
   interpretation: typeof dreams.interpretation;
   userRating: typeof dreams.userRating;
   userFeedbackText: typeof dreams.userFeedbackText;
+  isBookmarked: typeof dreams.isBookmarked;
   createdAt: typeof dreams.createdAt;
   updatedAt: typeof dreams.updatedAt;
   interpreterId: typeof interpreters.id;
@@ -135,6 +166,7 @@ function dreamDetailSelectFields(): {
   interpreterImageUrl: typeof interpreters.imageUrl;
   interpreterIsPremium: typeof interpreters.isPremium;
   interpreterSortOrder: typeof interpreters.sortOrder;
+  interpreterAccentColor: typeof interpreters.accentColor;
 } {
   return {
     id: dreams.id,
@@ -143,6 +175,7 @@ function dreamDetailSelectFields(): {
     interpretation: dreams.interpretation,
     userRating: dreams.userRating,
     userFeedbackText: dreams.userFeedbackText,
+    isBookmarked: dreams.isBookmarked,
     createdAt: dreams.createdAt,
     updatedAt: dreams.updatedAt,
     interpreterId: interpreters.id,
@@ -151,6 +184,7 @@ function dreamDetailSelectFields(): {
     interpreterImageUrl: interpreters.imageUrl,
     interpreterIsPremium: interpreters.isPremium,
     interpreterSortOrder: interpreters.sortOrder,
+    interpreterAccentColor: interpreters.accentColor,
   };
 }
 
@@ -158,13 +192,21 @@ function dreamListSelectFields(): {
   id: typeof dreams.id;
   content: typeof dreams.content;
   status: typeof dreams.status;
+  isBookmarked: typeof dreams.isBookmarked;
   createdAt: typeof dreams.createdAt;
+  interpreterId: typeof interpreters.id;
+  interpreterName: typeof interpreters.name;
+  interpreterAccentColor: typeof interpreters.accentColor;
 } {
   return {
     id: dreams.id,
     content: dreams.content,
     status: dreams.status,
+    isBookmarked: dreams.isBookmarked,
     createdAt: dreams.createdAt,
+    interpreterId: interpreters.id,
+    interpreterName: interpreters.name,
+    interpreterAccentColor: interpreters.accentColor,
   };
 }
 
@@ -242,6 +284,7 @@ export const dreamsService = {
           imageUrl: interpreters.imageUrl,
           isPremium: interpreters.isPremium,
           sortOrder: interpreters.sortOrder,
+          accentColor: interpreters.accentColor,
         })
         .from(interpreters)
         .where(and(eq(interpreters.id, input.interpreter_id), eq(interpreters.isActive, true)))
@@ -290,6 +333,7 @@ export const dreamsService = {
           .returning({ id: users.id });
 
         if (!extraSpend) {
+          logger.warn('credit spend failed: insufficient', { op: 'credit.spend', userId });
           throw new CreditError();
         }
 
@@ -311,6 +355,7 @@ export const dreamsService = {
           interpretation: dreams.interpretation,
           userRating: dreams.userRating,
           userFeedbackText: dreams.userFeedbackText,
+          isBookmarked: dreams.isBookmarked,
           createdAt: dreams.createdAt,
           updatedAt: dreams.updatedAt,
           interpreterId: dreams.interpreterId,
@@ -330,6 +375,7 @@ export const dreamsService = {
         interpretation: createdDream.interpretation,
         userRating: createdDream.userRating,
         userFeedbackText: createdDream.userFeedbackText,
+        isBookmarked: createdDream.isBookmarked,
         createdAt: createdDream.createdAt,
         updatedAt: createdDream.updatedAt,
         interpreterId: interpreter.id,
@@ -338,10 +384,12 @@ export const dreamsService = {
         interpreterImageUrl: interpreter.imageUrl,
         interpreterIsPremium: interpreter.isPremium,
         interpreterSortOrder: interpreter.sortOrder,
+        interpreterAccentColor: interpreter.accentColor,
       };
     });
 
     scheduleDreamProcessing(dream.id);
+    logger.info('dream created', { op: 'dream.create', userId, dreamId: dream.id });
 
     return serializeDream(dream);
   },
@@ -350,9 +398,64 @@ export const dreamsService = {
     return serializeDream(await findOwnedDream(userId, dreamId));
   },
 
+  async deleteDream(userId: string, dreamId: string): Promise<void> {
+    const [deleted] = await db
+      .delete(dreams)
+      .where(and(eq(dreams.id, dreamId), eq(dreams.userId, userId)))
+      .returning({ id: dreams.id });
+
+    if (!deleted) {
+      throw new NotFoundError('Ruya bulunamadi.');
+    }
+
+    logger.info('dream deleted', { op: 'dream.delete', userId, dreamId });
+  },
+
+  async setBookmark(userId: string, dreamId: string, input: SetBookmarkInput): Promise<DreamResponse> {
+    const [updatedDream] = await db
+      .update(dreams)
+      .set({ isBookmarked: input.bookmarked, updatedAt: new Date() })
+      .from(interpreters)
+      .where(
+        and(
+          eq(dreams.id, dreamId),
+          eq(dreams.userId, userId),
+          eq(dreams.interpreterId, interpreters.id),
+        ),
+      )
+      .returning({
+        id: dreams.id,
+        content: dreams.content,
+        status: dreams.status,
+        interpretation: dreams.interpretation,
+        userRating: dreams.userRating,
+        userFeedbackText: dreams.userFeedbackText,
+        isBookmarked: dreams.isBookmarked,
+        createdAt: dreams.createdAt,
+        updatedAt: dreams.updatedAt,
+        interpreterId: interpreters.id,
+        interpreterName: interpreters.name,
+        interpreterDescription: interpreters.description,
+        interpreterImageUrl: interpreters.imageUrl,
+        interpreterIsPremium: interpreters.isPremium,
+        interpreterSortOrder: interpreters.sortOrder,
+        interpreterAccentColor: interpreters.accentColor,
+      });
+
+    if (!updatedDream) {
+      throw new NotFoundError('Ruya bulunamadi.');
+    }
+
+    return serializeDream(updatedDream);
+  },
+
   async listDreams(userId: string, query: ListDreamsQuery): Promise<DreamListResponse> {
     const cursor = query.cursor ? decodeDreamCursor(query.cursor) : null;
     const whereConditions = [eq(dreams.userId, userId)];
+
+    if (query.bookmarked !== undefined) {
+      whereConditions.push(eq(dreams.isBookmarked, query.bookmarked === 'true'));
+    }
 
     if (cursor) {
       const cursorCondition = or(
@@ -368,6 +471,7 @@ export const dreamsService = {
     const rows = await db
       .select(dreamListSelectFields())
       .from(dreams)
+      .innerJoin(interpreters, eq(dreams.interpreterId, interpreters.id))
       .where(and(...whereConditions))
       .orderBy(desc(dreams.createdAt), desc(dreams.id))
       .limit(query.limit + 1);
@@ -405,6 +509,7 @@ export const dreamsService = {
         interpretation: dreams.interpretation,
         userRating: dreams.userRating,
         userFeedbackText: dreams.userFeedbackText,
+        isBookmarked: dreams.isBookmarked,
         createdAt: dreams.createdAt,
         updatedAt: dreams.updatedAt,
         interpreterId: interpreters.id,
@@ -413,6 +518,7 @@ export const dreamsService = {
         interpreterImageUrl: interpreters.imageUrl,
         interpreterIsPremium: interpreters.isPremium,
         interpreterSortOrder: interpreters.sortOrder,
+        interpreterAccentColor: interpreters.accentColor,
       });
 
     if (!updatedDream) {

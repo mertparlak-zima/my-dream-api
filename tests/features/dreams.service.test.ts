@@ -11,6 +11,7 @@ import { creditTransactions, dreams, users } from '../../src/db/schema';
 import { processDream } from '../../src/features/dreams/dreams.processor';
 import { dreamsService } from '../../src/features/dreams/dreams.service';
 import { getNextWeeklyResetDate } from '../../src/utils/date';
+import { logger } from '../../src/utils/logger';
 import {
   createDreamFixture,
   createInterpreterFixture,
@@ -288,11 +289,38 @@ describe('dreamsService credit behavior', () => {
         imageUrl: null,
         isPremium: false,
         sortOrder: 3,
+        accentColor: '#234E83',
       },
     });
 
     await expect(dreamsService.getDreamById(otherUser.id, dream.id)).rejects.toBeInstanceOf(NotFoundError);
     await expect(dreamsService.getDreamById(user.id, crypto.randomUUID())).rejects.toBeInstanceOf(NotFoundError);
+  });
+
+  it('deletes a dream for the owning user, nulls related transactions, and rejects foreign or missing dreams', async () => {
+    const user = await createUserFixture();
+    const otherUser = await createUserFixture();
+    const interpreter = await createInterpreterFixture();
+
+    const response = await dreamsService.createDream(user.id, {
+      content: 'vitest: dream to be deleted',
+      interpreter_id: interpreter.id,
+    });
+
+    // A foreign user cannot delete it and the dream survives.
+    await expect(dreamsService.deleteDream(otherUser.id, response.id)).rejects.toBeInstanceOf(NotFoundError);
+    expect(await getUserDreams(user.id)).toHaveLength(1);
+
+    await expect(dreamsService.deleteDream(user.id, response.id)).resolves.toBeUndefined();
+    expect(await getUserDreams(user.id)).toHaveLength(0);
+
+    // The spend transaction survives with a nulled related dream (onDelete: set null).
+    const transactions = await getUserTransactions(user.id);
+    expect(transactions).toHaveLength(1);
+    expect(transactions[0]?.relatedDreamId).toBeNull();
+
+    // A second delete (now missing) reports not found.
+    await expect(dreamsService.deleteDream(user.id, response.id)).rejects.toBeInstanceOf(NotFoundError);
   });
 
   it('lists only the current user dreams in reverse chronological order', async () => {
@@ -346,7 +374,10 @@ describe('dreamsService credit behavior', () => {
     try {
       const firstPage = await dreamsService.listDreams(user.id, { limit: 20 });
 
-      expect(Object.keys(selectArgs[0] ?? {})).toEqual(['id', 'content', 'status', 'createdAt']);
+      expect(Object.keys(selectArgs[0] ?? {})).toEqual([
+        'id', 'content', 'status', 'isBookmarked', 'createdAt',
+        'interpreterId', 'interpreterName', 'interpreterAccentColor',
+      ]);
       expect(firstPage.items).toHaveLength(20);
       expect(firstPage.nextCursor).toEqual(expect.any(String));
       expect(firstPage.items[0]).toEqual(
@@ -355,10 +386,14 @@ describe('dreamsService credit behavior', () => {
           content: 'vitest:user-dream-25',
           status: DREAM_STATUS.PENDING,
           createdAt: expect.any(String),
+          interpreter: {
+            id: interpreter.id,
+            name: 'vitest: list interpreter',
+            accentColor: '#234E83',
+          },
         }),
       );
       expect(firstPage.items[0]).not.toHaveProperty('interpretation');
-      expect(firstPage.items[0]).not.toHaveProperty('interpreter');
       expect(firstPage.items[0]).not.toHaveProperty('rating');
       expect(firstPage.items[0]).not.toHaveProperty('feedback');
       expect(firstPage.items[0]).not.toHaveProperty('updatedAt');
@@ -369,7 +404,10 @@ describe('dreamsService credit behavior', () => {
       });
 
       expect(selectArgs).toHaveLength(2);
-      expect(Object.keys(selectArgs[1] ?? {})).toEqual(['id', 'content', 'status', 'createdAt']);
+      expect(Object.keys(selectArgs[1] ?? {})).toEqual([
+        'id', 'content', 'status', 'isBookmarked', 'createdAt',
+        'interpreterId', 'interpreterName', 'interpreterAccentColor',
+      ]);
       expect(secondPage.items).toHaveLength(5);
       expect(secondPage.nextCursor).toBeNull();
       expect(secondPage.items.map((dream) => dream.id)).toEqual([
@@ -380,7 +418,8 @@ describe('dreamsService credit behavior', () => {
         userDreams[0]!.id,
       ]);
       expect(secondPage.items.every((dream) => dream.content.startsWith('vitest:user-dream-'))).toBe(true);
-      expect(secondPage.items.every((dream) => Object.keys(dream).sort().join(',') === 'content,createdAt,id,status')).toBe(true);
+      expect(secondPage.items.every((dream) => Object.keys(dream).sort().join(',') === 'content,createdAt,id,interpreter,isBookmarked,status')).toBe(true);
+      expect(secondPage.items.every((dream) => dream.interpreter.id === interpreter.id)).toBe(true);
     } finally {
       selectSpy.mockRestore();
     }
@@ -485,6 +524,7 @@ describe('dreamsService credit behavior', () => {
       imageUrl: null,
       isPremium: false,
       sortOrder: 7,
+      accentColor: '#234E83',
     });
 
     const storedDream = await testDb.query.dreams.findFirst({
@@ -925,7 +965,7 @@ describe('dreamsService credit behavior', () => {
   it('logs background worker errors when scheduled processing rejects', async () => {
     vi.useFakeTimers();
 
-    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const logErrorSpy = vi.spyOn(logger, 'error');
     vi.spyOn(db, 'update').mockImplementationOnce(() => {
       throw new Error('vitest: scheduled processing failed');
     });
@@ -933,16 +973,19 @@ describe('dreamsService credit behavior', () => {
     scheduleDreamProcessing(crypto.randomUUID());
     await vi.advanceTimersByTimeAsync(300);
 
-    expect(consoleErrorSpy).toHaveBeenCalledWith(
-      '[DREAM_WORKER_ERROR]',
-      expect.objectContaining({ message: 'vitest: scheduled processing failed' }),
+    expect(logErrorSpy).toHaveBeenCalledWith(
+      'dream worker failed',
+      expect.objectContaining({
+        op: 'dream.worker',
+        err: expect.objectContaining({ message: 'vitest: scheduled processing failed' }),
+      }),
     );
   });
 
   it('normalizes non-Error scheduled processing rejections', async () => {
     vi.useFakeTimers();
 
-    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const logErrorSpy = vi.spyOn(logger, 'error');
     vi.spyOn(db, 'update').mockImplementationOnce(() => {
       throw new String('vitest: scheduled plain failure');
     });
@@ -950,9 +993,12 @@ describe('dreamsService credit behavior', () => {
     scheduleDreamProcessing(crypto.randomUUID());
     await vi.advanceTimersByTimeAsync(300);
 
-    expect(consoleErrorSpy).toHaveBeenCalledWith(
-      '[DREAM_WORKER_ERROR]',
-      new String('vitest: scheduled plain failure'),
+    expect(logErrorSpy).toHaveBeenCalledWith(
+      'dream worker failed',
+      expect.objectContaining({
+        op: 'dream.worker',
+        err: expect.objectContaining({ name: 'NonError', message: 'vitest: scheduled plain failure' }),
+      }),
     );
   });
 

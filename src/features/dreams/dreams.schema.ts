@@ -1,4 +1,4 @@
-import { index, integer, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core';
+import { boolean, index, integer, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core';
 import { DREAM_STATUS } from '../../constants/domain';
 import { dreamStatusEnum } from '../../db/enums';
 import { interpreters } from '../interpreters/interpreters.schema';
@@ -19,12 +19,14 @@ export const dreams = pgTable(
     status: dreamStatusEnum('status').notNull().default(DREAM_STATUS.PENDING),
     userRating: integer('user_rating'),
     userFeedbackText: text('user_feedback_text'),
+    isBookmarked: boolean('is_bookmarked').notNull().default(false),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
     index('dreams_user_created_at_idx').on(table.userId, table.createdAt),
     index('dreams_user_status_idx').on(table.userId, table.status),
+    index('dreams_user_bookmarked_created_at_idx').on(table.userId, table.isBookmarked, table.createdAt),
     index('dreams_interpreter_id_idx').on(table.interpreterId),
   ],
 );

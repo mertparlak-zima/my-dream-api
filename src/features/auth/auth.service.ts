@@ -3,6 +3,7 @@ import { users } from '../users/users.schema';
 import { getNextWeeklyResetDate } from '../../utils/date';
 import { NotFoundError } from '../../errors/NotFoundError';
 import { serializeUser, type UserResponse } from '../users/users.service';
+import { logger, serializeError } from '../../utils/logger';
 import { addSentryBreadcrumb } from '../../utils/sentry';
 import type { SyncUserInput } from './auth.schemas';
 
@@ -41,6 +42,7 @@ export const authService = {
         throw new NotFoundError('Kullanici senkronize edilemedi.');
       }
 
+      logger.info('auth sync succeeded', { op: 'auth.sync', userId, authProvider: input.auth_provider });
       addSentryBreadcrumb('auth.sync', 'Supabase user synced', {
         authProvider: input.auth_provider,
         userId,
@@ -48,6 +50,7 @@ export const authService = {
 
       return serializeUser(syncedUser);
     } catch (error) {
+      logger.error('auth sync failed', { op: 'auth.sync', userId, err: serializeError(error) });
       addSentryBreadcrumb('auth.sync', 'Supabase user sync failed', {
         authProvider: input.auth_provider,
         errorName: error instanceof Error ? error.name : 'UnknownError',

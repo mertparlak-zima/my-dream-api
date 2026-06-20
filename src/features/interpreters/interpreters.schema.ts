@@ -1,5 +1,7 @@
-import { boolean, index, integer, pgTable, text, timestamp, uuid, varchar } from 'drizzle-orm/pg-core';
+import { boolean, index, integer, jsonb, numeric, pgTable, text, timestamp, uuid, varchar } from 'drizzle-orm/pg-core';
 import { aiModels } from '../ai_models/models.schema';
+
+export type InterpreterSampleRow = { ctx: string; quote: string };
 
 export const interpreters = pgTable(
   'interpreters',
@@ -15,6 +17,17 @@ export const interpreters = pgTable(
       .references(() => aiModels.id, { onDelete: 'restrict' }),
     isActive: boolean('is_active').notNull().default(true),
     sortOrder: integer('sort_order').notNull().default(0),
+    // Per-interpreter presentation data (#67): short category tag + avatar accent
+    // color (hex). Dynamic per interpreter, served from the API (not client-derived).
+    tag: varchar('tag', { length: 80 }).notNull(),
+    accentColor: varchar('accent_color', { length: 9 }).notNull(),
+    // Enrichment (#41): rating/reviews/styles/story/samples (Turkish content,
+    // single-language like name/description). Nullable so non-enriched rows work.
+    rating: numeric('rating', { precision: 2, scale: 1 }),
+    reviews: integer('reviews').notNull().default(0),
+    styles: text('styles').array(),
+    story: text('story'),
+    samples: jsonb('samples').$type<InterpreterSampleRow[]>(),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },

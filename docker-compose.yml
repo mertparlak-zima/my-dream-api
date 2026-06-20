@@ -17,6 +17,21 @@ services:
       retries: 10
     restart: unless-stopped
 
+  mydream-redis:
+    image: redis:7-alpine
+    container_name: mydream-redis
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - mydream-redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
   mydream-api:
     build:
       context: .
@@ -28,6 +43,8 @@ services:
     depends_on:
       mydream-db:
         condition: service_healthy
+      mydream-redis:
+        condition: service_healthy
     volumes:
       - .:/app
       - /app/node_modules
@@ -35,6 +52,7 @@ services:
       - .env
     environment:
       DATABASE_URL: postgres://mydream:mydream@mydream-db:5432/mydream
+      REDIS_URL: redis://mydream-redis:6379
       JWT_SECRET: dev-jwt-secret-change-me
       NODE_ENV: development
       DEV_AUTH_ENABLED: "true"
@@ -44,3 +62,4 @@ services:
 
 volumes:
   mydream-db-data:
+  mydream-redis-data:

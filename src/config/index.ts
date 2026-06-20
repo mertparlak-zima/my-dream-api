@@ -18,6 +18,7 @@ export const IS_TEST = NODE_ENV === 'test';
 export const IS_PRODUCTION = NODE_ENV === 'production';
 
 export const DATABASE_URL = runtimeEnv.DATABASE_URL;
+export const REDIS_URL = runtimeEnv.REDIS_URL;
 export const JWT_SECRET = runtimeEnv.JWT_SECRET;
 export const OPENROUTER_API_KEY = runtimeEnv.OPENROUTER_API_KEY;
 export const SUPABASE_URL = runtimeEnv.SUPABASE_URL;
@@ -39,6 +40,12 @@ export const SENTRY_CONFIG = {
   ENVIRONMENT: runtimeEnv.SENTRY_ENVIRONMENT,
   RELEASE: runtimeEnv.SENTRY_RELEASE,
   TRACES_SAMPLE_RATE: runtimeEnv.SENTRY_TRACES_SAMPLE_RATE,
+} as const;
+
+export const LOG_CONFIG = {
+  LEVEL: runtimeEnv.LOG_LEVEL,
+  FORMAT: runtimeEnv.LOG_FORMAT,
+  ENABLED: runtimeEnv.LOG_ENABLED,
 } as const;
 
 export const DREAM_CONFIG = {

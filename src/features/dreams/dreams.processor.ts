@@ -3,6 +3,7 @@ import { DREAM_PROCESSING_CONFIG } from '../../config';
 import { CREDIT_TRANSACTION_TYPE, DREAM_STATUS } from '../../constants/domain';
 import { db } from '../../db';
 import { AppError } from '../../errors/AppError';
+import { logger, serializeError } from '../../utils/logger';
 import { captureDreamProcessingError } from '../../utils/sentry';
 import { aiModels } from '../ai_models/models.schema';
 import { creditTransactions } from '../credits/credits.schema';
@@ -56,7 +57,7 @@ function sanitizeInterpretation(interpretation: string): string {
 export function scheduleDreamProcessing(dreamId: string): void {
   setTimeout(() => {
     void processDream(dreamId, { provider: scheduledProvider }).catch((error: unknown) => {
-      console.error('[DREAM_WORKER_ERROR]', error);
+      logger.error('dream worker failed', { op: 'dream.worker', dreamId, err: serializeError(error) });
       captureDreamProcessingError(error instanceof Error ? error : new Error('Dream worker processing failed.'), {
         dreamId,
         failureClass: 'worker',
@@ -120,6 +121,8 @@ export async function processDream(
     return;
   }
 
+  logger.info('dream interpretation started', { op: 'dream.process', dreamId: dream.id });
+
   try {
     const result = await provider.interpret({
       dreamId: dream.id,
@@ -148,8 +151,10 @@ export async function processDream(
         updatedAt: new Date(),
       })
       .where(and(eq(dreams.id, dreamId), eq(dreams.status, DREAM_STATUS.PROCESSING)));
+
+    logger.info('dream interpretation succeeded', { op: 'dream.process', dreamId: dream.id });
   } catch (error) {
-    console.error('[DREAM_PROVIDER_ERROR]', error);
+    logger.error('dream interpretation failed', { op: 'dream.process', dreamId: dream.id, err: serializeError(error) });
     captureDreamProcessingError(error instanceof Error ? error : new Error('Dream provider processing failed.'), {
       dreamId: dream.id,
       userId: dream.userId,

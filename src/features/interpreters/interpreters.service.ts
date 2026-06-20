@@ -1,7 +1,8 @@
 import { and, asc, eq } from 'drizzle-orm';
 import { db } from '../../db';
 import { NotFoundError } from '../../errors/NotFoundError';
-import { interpreters } from './interpreters.schema';
+import { CACHE_KEY, CACHE_TTL, cached } from '../../services/cache';
+import { interpreters, type InterpreterSampleRow } from './interpreters.schema';
 
 export type InterpreterResponse = {
   id: string;
@@ -10,6 +11,13 @@ export type InterpreterResponse = {
   image_url: string | null;
   is_premium: boolean;
   sort_order: number;
+  tag: string;
+  accent_color: string;
+  rating: number | null;
+  reviews: number;
+  styles: string[];
+  story: string | null;
+  samples: InterpreterSampleRow[];
 };
 
 const interpreterResponseFields = {
@@ -19,6 +27,13 @@ const interpreterResponseFields = {
   imageUrl: interpreters.imageUrl,
   isPremium: interpreters.isPremium,
   sortOrder: interpreters.sortOrder,
+  tag: interpreters.tag,
+  accentColor: interpreters.accentColor,
+  rating: interpreters.rating,
+  reviews: interpreters.reviews,
+  styles: interpreters.styles,
+  story: interpreters.story,
+  samples: interpreters.samples,
 };
 
 function serializeInterpreter(row: {
@@ -28,6 +43,13 @@ function serializeInterpreter(row: {
   imageUrl: string | null;
   isPremium: boolean;
   sortOrder: number;
+  tag: string;
+  accentColor: string;
+  rating: string | null;
+  reviews: number;
+  styles: string[] | null;
+  story: string | null;
+  samples: InterpreterSampleRow[] | null;
 }): InterpreterResponse {
   return {
     id: row.id,
@@ -36,30 +58,43 @@ function serializeInterpreter(row: {
     image_url: row.imageUrl,
     is_premium: row.isPremium,
     sort_order: row.sortOrder,
+    tag: row.tag,
+    accent_color: row.accentColor,
+    rating: row.rating !== null ? Number(row.rating) : null,
+    reviews: row.reviews,
+    styles: row.styles ?? [],
+    story: row.story,
+    samples: row.samples ?? [],
   };
 }
 
 export const interpretersService = {
   async listActiveInterpreters(): Promise<InterpreterResponse[]> {
-    const rows = await db
-      .select(interpreterResponseFields)
-      .from(interpreters)
-      .where(eq(interpreters.isActive, true))
-      .orderBy(asc(interpreters.sortOrder), asc(interpreters.name));
+    // Read-heavy, rarely changes → read-through cache. On enrichment edits,
+    // re-seed/invalidate `CACHE_KEY.interpreters`.
+    return cached(`${CACHE_KEY.interpreters}:list`, { ttlSeconds: CACHE_TTL.INTERPRETERS }, async () => {
+      const rows = await db
+        .select(interpreterResponseFields)
+        .from(interpreters)
+        .where(eq(interpreters.isActive, true))
+        .orderBy(asc(interpreters.sortOrder), asc(interpreters.name));
 
-    return rows.map(serializeInterpreter);
+      return rows.map(serializeInterpreter);
+    });
   },
   async getInterpreterById(id: string): Promise<InterpreterResponse> {
-    const [row] = await db
-      .select(interpreterResponseFields)
-      .from(interpreters)
-      .where(and(eq(interpreters.id, id), eq(interpreters.isActive, true)))
-      .limit(1);
+    return cached(`${CACHE_KEY.interpreters}:byId:${id}`, { ttlSeconds: CACHE_TTL.INTERPRETERS }, async () => {
+      const [row] = await db
+        .select(interpreterResponseFields)
+        .from(interpreters)
+        .where(and(eq(interpreters.id, id), eq(interpreters.isActive, true)))
+        .limit(1);
 
-    if (!row) {
-      throw new NotFoundError('Yorumcu bulunamadi.');
-    }
+      if (!row) {
+        throw new NotFoundError('Yorumcu bulunamadi.');
+      }
 
-    return serializeInterpreter(row);
+      return serializeInterpreter(row);
+    });
   },
 };

@@ -44,6 +44,8 @@ type InterpreterFixtureInput = {
   isPremium?: boolean;
   isActive?: boolean;
   sortOrder?: number;
+  tag?: string;
+  accentColor?: string;
 };
 
 type DreamFixtureInput = {
@@ -54,6 +56,7 @@ type DreamFixtureInput = {
   status?: (typeof DREAM_STATUS)[keyof typeof DREAM_STATUS];
   userRating?: number | null;
   userFeedbackText?: string | null;
+  isBookmarked?: boolean;
 };
 
 type CreditFixtureInput = {
@@ -148,6 +151,8 @@ export async function createInterpreterFixture(input: InterpreterFixtureInput = 
     isPremium: input.isPremium ?? false,
     isActive: input.isActive ?? true,
     sortOrder: input.sortOrder ?? 0,
+    tag: input.tag ?? `${TEST_TEXT_PREFIX}tag`,
+    accentColor: input.accentColor ?? '#234E83',
     updatedAt: now,
   });
 
@@ -167,6 +172,7 @@ export async function createSmokeInterpreterFixture(
   });
 }
 
+
 export async function createDreamFixture(input: DreamFixtureInput) {
   const now = new Date();
   const id = crypto.randomUUID();
@@ -180,6 +186,7 @@ export async function createDreamFixture(input: DreamFixtureInput) {
     status: input.status ?? DREAM_STATUS.PENDING,
     userRating: input.userRating ?? null,
     userFeedbackText: input.userFeedbackText ?? null,
+    isBookmarked: input.isBookmarked ?? false,
     updatedAt: now,
   });
 

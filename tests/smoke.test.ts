@@ -9,9 +9,11 @@ describe('app smoke', () => {
     const response = await appRequest('/health');
 
     expect(response.status).toBe(200);
+    // Redis is unconfigured in the test env → reported as 'disabled'.
     await expect(response.json()).resolves.toEqual({
       success: true,
       status: 'ok',
+      redis: 'disabled',
     });
   });
 });

@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { NotFoundError } from '../../src/errors/NotFoundError';
 import { errorHandler } from '../../src/middlewares/errorHandler';
+import { logger } from '../../src/utils/logger';
 
 function createContext(): Context {
   return {
@@ -105,7 +106,7 @@ describe('errorHandler', () => {
   });
 
   it('returns the development generic error envelope and logs the error', async () => {
-    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const logError = vi.spyOn(logger, 'error');
     const error = new Error('kaboom');
     const response = errorHandler(error, createContext());
     const json = await parseResponse(response);
@@ -118,12 +119,10 @@ describe('errorHandler', () => {
         message: 'kaboom',
       },
     });
-    expect(consoleError).toHaveBeenCalledWith('[UNHANDLED_ERROR]', error);
+    expect(logError).toHaveBeenCalledWith('unhandled error', expect.objectContaining({ op: 'http' }));
   });
 
   it('returns the production generic error envelope', async () => {
-    vi.spyOn(console, 'error').mockImplementation(() => undefined);
-
     const { response, json } = await invokeProductionHandler(new Error('kaboom'));
 
     expect(response.status).toBe(500);

@@ -54,6 +54,7 @@ describe('roadmap 0008 route contracts', () => {
     await expect(response.json()).resolves.toEqual({
       success: true,
       status: 'ok',
+      redis: 'disabled',
     });
   });
 
@@ -155,6 +156,8 @@ describe('roadmap 0008 route contracts', () => {
           image_url: null,
           is_premium: false,
           sort_order: 5,
+          tag: 'vitest:tag',
+          accent_color: '#234E83',
         }),
       ]),
     );
@@ -200,6 +203,14 @@ describe('roadmap 0008 route contracts', () => {
         image_url: null,
         is_premium: true,
         sort_order: 9,
+        tag: 'vitest:tag',
+        accent_color: '#234E83',
+        // Enrichment (#41): a fixture interpreter has no enrichment → defaults.
+        rating: null,
+        reviews: 0,
+        styles: [],
+        story: null,
+        samples: [],
       },
     });
   });
@@ -271,6 +282,7 @@ describe('roadmap 0008 route contracts', () => {
         mood: null,
         rating: null,
         feedback: null,
+        isBookmarked: false,
         createdAt: expect.any(String),
         updatedAt: expect.any(String),
       },
@@ -318,7 +330,14 @@ describe('roadmap 0008 route contracts', () => {
     expect(json.data.items).toHaveLength(20);
     expect(json.data.nextCursor).toEqual(expect.any(String));
     expect(json.data.items.every((dream: { content: string }) => dream.content.startsWith('vitest:user-dream-'))).toBe(true);
-    expect(json.data.items.every((dream: { interpreter: unknown }) => dream.interpreter === undefined)).toBe(true);
+    // List items carry a minimal interpreter summary (id/name/accentColor) so the
+    // app can render journal-card avatars without a second lookup.
+    expect(json.data.items.every(
+      (dream: { interpreter: { id: string; name: string; accentColor: string } }) =>
+        dream.interpreter.id === interpreter.id
+        && typeof dream.interpreter.name === 'string'
+        && dream.interpreter.accentColor === '#234E83',
+    )).toBe(true);
     expect(json.data.items.every((dream: { interpretation: unknown }) => dream.interpretation === undefined)).toBe(true);
 
     const secondPage = await requestJson(`/dreams?cursor=${encodeURIComponent(json.data.nextCursor)}`, {
@@ -375,10 +394,12 @@ describe('roadmap 0008 route contracts', () => {
           imageUrl: null,
           isPremium: false,
           sortOrder: 6,
+          accentColor: '#234E83',
         },
         mood: null,
         rating: 8,
         feedback: 'vitest:route-detail-feedback',
+        isBookmarked: false,
         createdAt: expect.any(String),
         updatedAt: expect.any(String),
       },
@@ -396,6 +417,51 @@ describe('roadmap 0008 route contracts', () => {
         message: expect.any(String),
       },
     });
+  });
+
+  it('DELETE /dreams/:id removes the owner dream and returns NOT_FOUND for foreigners or missing dreams', async () => {
+    const user = await createAuthedUserFixture();
+    const otherUser = await createAuthedUserFixture();
+    const interpreter = await createInterpreterFixture();
+    const dream = await createDreamFixture({
+      userId: user.id,
+      interpreterId: interpreter.id,
+      content: 'vitest:route-delete-dream',
+      status: DREAM_STATUS.COMPLETED,
+      interpretation: 'vitest:route-delete-interpretation',
+    });
+
+    // A foreign user cannot delete it.
+    const foreignResult = await requestJson(`/dreams/${dream.id}`, {
+      method: 'DELETE',
+      headers: otherUser.authHeaders,
+    });
+    expect(foreignResult.response.status).toBe(404);
+    expect(foreignResult.json).toEqual({
+      success: false,
+      error: { code: 'NOT_FOUND', message: expect.any(String) },
+    });
+
+    // The owner deletes it and gets the id echoed back.
+    const ownerResult = await requestJson(`/dreams/${dream.id}`, {
+      method: 'DELETE',
+      headers: user.authHeaders,
+    });
+    expect(ownerResult.response.status).toBe(200);
+    expect(ownerResult.json).toEqual({
+      success: true,
+      data: { id: dream.id },
+    });
+
+    const remaining = await testDb.select().from(dreams).where(eq(dreams.id, dream.id));
+    expect(remaining).toHaveLength(0);
+
+    // Deleting again (now missing) reports not found.
+    const missingResult = await requestJson(`/dreams/${dream.id}`, {
+      method: 'DELETE',
+      headers: user.authHeaders,
+    });
+    expect(missingResult.response.status).toBe(404);
   });
 
   it('PATCH /dreams/:id/feedback returns a validation envelope for an invalid rating', async () => {

@@ -2,7 +2,13 @@ import { Hono } from 'hono';
 import { authMiddleware } from '../../middlewares/authMiddleware';
 import { getAuthUserId } from '../../utils/authContext';
 import { zValidator } from '../../utils/zValidator';
-import { createDreamSchema, dreamIdParamSchema, listDreamsQuerySchema, submitDreamFeedbackSchema } from './dreams.schemas';
+import {
+  createDreamSchema,
+  dreamIdParamSchema,
+  listDreamsQuerySchema,
+  setBookmarkSchema,
+  submitDreamFeedbackSchema,
+} from './dreams.schemas';
 import { dreamsService } from './dreams.service';
 
 export const dreamsRoutes = new Hono();
@@ -26,6 +32,23 @@ dreamsRoutes.get('/:id', zValidator('param', dreamIdParamSchema), async (c) => {
 
   return c.json({ success: true, data: dream });
 });
+
+dreamsRoutes.delete('/:id', zValidator('param', dreamIdParamSchema), async (c) => {
+  await dreamsService.deleteDream(getAuthUserId(c), c.req.valid('param').id);
+
+  return c.json({ success: true, data: { id: c.req.valid('param').id } });
+});
+
+dreamsRoutes.patch(
+  '/:id/bookmark',
+  zValidator('param', dreamIdParamSchema),
+  zValidator('json', setBookmarkSchema),
+  async (c) => {
+    const dream = await dreamsService.setBookmark(getAuthUserId(c), c.req.valid('param').id, c.req.valid('json'));
+
+    return c.json({ success: true, data: dream });
+  },
+);
 
 dreamsRoutes.patch(
   '/:id/feedback',

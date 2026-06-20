@@ -9,10 +9,17 @@ export const createDreamSchema = z.object({
 export const listDreamsQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(20),
   cursor: z.string().max(200).optional(),
+  // Filter by bookmark state when provided (e.g. the Bookmarks screen sends
+  // `?bookmarked=true`). Absent → no bookmark filter.
+  bookmarked: z.enum(['true', 'false']).optional(),
 });
 
 export const dreamIdParamSchema = z.object({
   id: z.uuid(),
+});
+
+export const setBookmarkSchema = z.object({
+  bookmarked: z.boolean(),
 });
 
 export const submitDreamFeedbackSchema = z.object({
@@ -23,3 +30,4 @@ export const submitDreamFeedbackSchema = z.object({
 export type CreateDreamInput = z.infer<typeof createDreamSchema>;
 export type ListDreamsQuery = z.infer<typeof listDreamsQuerySchema>;
 export type SubmitDreamFeedbackInput = z.infer<typeof submitDreamFeedbackSchema>;
+export type SetBookmarkInput = z.infer<typeof setBookmarkSchema>;

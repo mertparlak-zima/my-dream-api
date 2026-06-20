@@ -1,6 +1,7 @@
 import { createMiddleware } from 'hono/factory';
 import { createRemoteJWKSet, decodeProtectedHeader, jwtVerify, type JWTPayload } from 'jose';
 import { AuthError } from '../errors/AuthError';
+import { setLogUser } from '../utils/logger';
 import {
   DEV_AUTH_ENABLED,
   JWT_SECRET,
@@ -56,6 +57,7 @@ export const authMiddleware = createMiddleware(async (c, next) => {
 
   if (DEV_AUTH_ENABLED && devUserId) {
     c.set('userId', devUserId);
+    setLogUser(devUserId);
     await next();
     return;
   }
@@ -70,6 +72,7 @@ export const authMiddleware = createMiddleware(async (c, next) => {
   try {
     const userId = await verifyAuthToken(token);
     c.set('userId', userId);
+    setLogUser(userId);
     await next();
   } catch (error) {
     if (error instanceof AuthError) {
