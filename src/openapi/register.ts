@@ -69,6 +69,7 @@ const UserSchema = z
     last_name: z.string().nullable().openapi({ example: 'User' }),
     plan: PlanSchema,
     weekly_dream_count: z.number().int().openapi({ example: 0 }),
+    bookmark_count: z.number().int().openapi({ example: 0 }),
     weekly_limit: z.number().int().openapi({ example: 1 }),
     limit_reset_date: IsoDateSchema,
     extra_credits: z.number().int().openapi({ example: 5 }),

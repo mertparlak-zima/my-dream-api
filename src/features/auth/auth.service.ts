@@ -2,7 +2,7 @@ import { db } from '../../db';
 import { users } from '../users/users.schema';
 import { getNextWeeklyResetDate } from '../../utils/date';
 import { NotFoundError } from '../../errors/NotFoundError';
-import { serializeUser, type UserResponse } from '../users/users.service';
+import { countUserBookmarks, serializeUser, type UserResponse } from '../users/users.service';
 import { logger, serializeError } from '../../utils/logger';
 import { addSentryBreadcrumb } from '../../utils/sentry';
 import type { SyncUserInput } from './auth.schemas';
@@ -48,7 +48,7 @@ export const authService = {
         userId,
       });
 
-      return serializeUser(syncedUser);
+      return serializeUser(syncedUser, await countUserBookmarks(syncedUser.id));
     } catch (error) {
       logger.error('auth sync failed', { op: 'auth.sync', userId, err: serializeError(error) });
       addSentryBreadcrumb('auth.sync', 'Supabase user sync failed', {
