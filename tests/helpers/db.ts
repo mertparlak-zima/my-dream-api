@@ -22,18 +22,65 @@ function isAllowedFallbackEnv(env: string | undefined): boolean {
   return env === 'development' || env === 'test';
 }
 
+/** Hosts the test suite is allowed to wipe rows from without an explicit override. */
+const LOCAL_DB_HOSTS = new Set(['localhost', '127.0.0.1', '0.0.0.0', '::1', '[::1]']);
+
+/**
+ * Refuse to point the test suite at a non-local database. `cleanupTestData()`
+ * issues DELETEs, so a stray prod `TEST_DATABASE_URL`/`DATABASE_URL` (e.g. the
+ * Supabase url in `.env`) must fail loud rather than silently delete prod rows.
+ * Set `ALLOW_NON_LOCAL_TEST_DB=true` to override intentionally (e.g. a remote
+ * throwaway test DB).
+ */
+export function assertLocalTestDatabase(url: string): void {
+  if (process.env.ALLOW_NON_LOCAL_TEST_DB === 'true') {
+    return;
+  }
+
+  let host: string;
+  try {
+    host = new URL(url).hostname;
+  } catch {
+    throw new Error(`Invalid test database url: "${url}".`);
+  }
+
+  // Local = loopback set, a bare service name (Docker Compose `db`/`postgres`,
+  // no dot), an empty host (Unix domain socket), or an mDNS/local TLD. Real
+  // databases (Supabase, RDS, …) are dotted FQDNs and stay blocked.
+  const isLocal =
+    !host ||
+    !host.includes('.') ||
+    host.endsWith('.local') ||
+    host.endsWith('.localhost') ||
+    LOCAL_DB_HOSTS.has(host);
+
+  if (!isLocal) {
+    throw new Error(
+      `Refusing to run tests against non-local database host "${host}". ` +
+        'cleanupTestData() deletes rows — point TEST_DATABASE_URL at a local Postgres, ' +
+        'or set ALLOW_NON_LOCAL_TEST_DB=true to override intentionally.',
+    );
+  }
+}
+
 export function resolveTestDatabaseUrl(): string {
-  if (process.env.TEST_DATABASE_URL) {
-    return process.env.TEST_DATABASE_URL;
-  }
+  const url = (() => {
+    if (process.env.TEST_DATABASE_URL) {
+      return process.env.TEST_DATABASE_URL;
+    }
 
-  if (isAllowedFallbackEnv(process.env.NODE_ENV) && process.env.DATABASE_URL) {
-    return process.env.DATABASE_URL;
-  }
+    if (isAllowedFallbackEnv(process.env.NODE_ENV) && process.env.DATABASE_URL) {
+      return process.env.DATABASE_URL;
+    }
 
-  throw new Error(
-    'TEST_DATABASE_URL is required for tests. DATABASE_URL fallback is only allowed in development/test.',
-  );
+    throw new Error(
+      'TEST_DATABASE_URL is required for tests. DATABASE_URL fallback is only allowed in development/test.',
+    );
+  })();
+
+  assertLocalTestDatabase(url);
+
+  return url;
 }
 
 export const testQueryClient = postgres(resolveTestDatabaseUrl(), { prepare: false });
