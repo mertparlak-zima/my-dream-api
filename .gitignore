@@ -16,3 +16,6 @@ supabase/.temp/
 
 # os
 .DS_Store
+
+# RELAY implementer plans (local handoff docs, not tracked)
+/plans/
