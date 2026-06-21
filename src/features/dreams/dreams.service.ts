@@ -14,6 +14,7 @@ import { ValidationError } from '../../errors/ValidationError';
 import { logger } from '../../utils/logger';
 import { consumeForDream, ensureUserDomainState } from '../credits/credit-engine';
 import { userEntitlements } from '../../db/schema/domain';
+import { users } from '../../db/schema/auth';
 import { interpreters } from '../interpreters/interpreters.schema';
 import { scheduleDreamProcessing } from './dreams.processor';
 import { dreams } from './dreams.schema';
@@ -328,6 +329,13 @@ export const dreamsService = {
     const requestHash = computeRequestHash(input.content, input.interpreter_id);
 
     const result = await db.transaction(async (tx) => {
+      // Identity is owned by Better Auth; reject unknown ids before provisioning
+      // domain rows (whose FKs would otherwise fail loudly).
+      const [owner] = await tx.select({ id: users.id }).from(users).where(eq(users.id, userId)).limit(1);
+      if (!owner) {
+        throw new NotFoundError('Kullanici bulunamadi.');
+      }
+
       await ensureUserDomainState(tx, userId);
 
       const [entitlement] = await tx
@@ -335,6 +343,7 @@ export const dreamsService = {
         .from(userEntitlements)
         .where(eq(userEntitlements.userId, userId))
         .limit(1);
+      /* v8 ignore next -- ensureUserDomainState above guarantees the entitlement row */
       const plan = entitlement?.plan ?? PLAN.FREE;
 
       const [interpreter] = await tx
@@ -384,6 +393,7 @@ export const dreamsService = {
           .where(and(eq(dreams.userId, userId), eq(dreams.clientRequestId, input.client_request_id)))
           .limit(1);
 
+        /* v8 ignore next 3 -- defensive: within one tx a conflicting row is always visible */
         if (!existing) {
           throw new ConflictError('Istek islenemedi, lutfen tekrar deneyin.');
         }

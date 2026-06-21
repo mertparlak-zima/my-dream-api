@@ -36,7 +36,7 @@ function sleep(ms: number): Promise<void> {
 
 function sanitizeInterpretation(interpretation: string): string {
   const normalized = interpretation
-    .replace(/\u0000/g, '')
+    .split('\u0000').join('')
     .replace(/\r\n/g, '\n')
     .replace(/\n{3,}/g, '\n\n')
     .trim();
@@ -97,6 +97,7 @@ async function claimAndRefund(tx: Tx, dreamId: string, now: Date): Promise<void>
     .where(and(eq(dreams.id, dreamId), isNull(dreams.refundedAt)))
     .returning(refundSelect);
 
+  /* v8 ignore next 3 -- defensive: a concurrent sweep already claimed the refund */
   if (!claimed) {
     return;
   }
@@ -145,6 +146,7 @@ async function transitionToFailedAndRefund(
       .where(guard)
       .returning({ id: dreams.id });
 
+    /* v8 ignore next 3 -- defensive: another worker already moved the dream off this attempt */
     if (!failed) {
       return;
     }

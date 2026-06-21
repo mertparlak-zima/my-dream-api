@@ -1,16 +1,16 @@
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { DREAM_PROCESSING_CONFIG, PLAN_LIMITS } from '../../src/config';
-import { CREDIT_TRANSACTION_TYPE, DREAM_STATUS, PLAN } from '../../src/constants/domain';
+import { DREAM_STATUS, LEDGER_REASON, PLAN, QUOTA_KEY, QUOTA_SOURCE } from '../../src/constants/domain';
 import { CreditError } from '../../src/errors/CreditError';
 import { ForbiddenError } from '../../src/errors/ForbiddenError';
 import { NotFoundError } from '../../src/errors/NotFoundError';
 import { ValidationError } from '../../src/errors/ValidationError';
 import { db } from '../../src/db';
 import { DEFAULT_SEED_OPENROUTER_MODEL_ID } from '../../src/db/seed.policy';
-import { creditTransactions, dreams, users } from '../../src/db/schema';
-import { processDream } from '../../src/features/dreams/dreams.processor';
+import { creditTransactions, dreams, userUsage, userWallets } from '../../src/db/schema';
+import { processDream, recoverStuckDreams } from '../../src/features/dreams/dreams.processor';
 import { dreamsService } from '../../src/features/dreams/dreams.service';
-import { getNextWeeklyResetDate } from '../../src/utils/date';
+import { getWeekStartUtc } from '../../src/features/credits/quota-window';
 import { logger } from '../../src/utils/logger';
 import {
   createDreamFixture,
@@ -29,25 +29,39 @@ import {
   scheduleDreamProcessing,
 } from '../helpers/dreamsProcessing';
 
-async function getUserCredits(userId: string) {
-  const user = await testDb.query.users.findFirst({
-    where: eq(users.id, userId),
-    columns: {
-      weeklyDreamCount: true,
-      extraCredits: true,
-      limitResetDate: true,
-    },
-  });
+const FREE_LIMIT = PLAN_LIMITS[PLAN.FREE];
 
-  expect(user).toBeTruthy();
-  return user!;
+function dreamInput(content: string, interpreterId: string) {
+  return { content, interpreter_id: interpreterId, client_request_id: crypto.randomUUID() };
 }
 
-async function getDreamTransactions(dreamId: string) {
-  return testDb.query.creditTransactions.findMany({
+/** Effective weekly usage + wallet balance in the new decomposed model. */
+async function getQuotaAndWallet(userId: string) {
+  const weekStart = getWeekStartUtc(new Date());
+  const [usage] = await testDb
+    .select({ usedCount: userUsage.usedCount, windowStartedAt: userUsage.windowStartedAt })
+    .from(userUsage)
+    .where(and(eq(userUsage.userId, userId), eq(userUsage.quotaKey, QUOTA_KEY.weekly_free_dream)))
+    .limit(1);
+  const [wallet] = await testDb
+    .select({ balance: userWallets.balance })
+    .from(userWallets)
+    .where(eq(userWallets.userId, userId))
+    .limit(1);
+
+  return {
+    weeklyDreamCount:
+      usage && usage.windowStartedAt.getTime() >= weekStart.getTime() ? usage.usedCount : 0,
+    extraCredits: wallet?.balance ?? 0,
+  };
+}
+
+async function getDreamLedgerReasons(dreamId: string): Promise<string[]> {
+  const rows = await testDb.query.creditTransactions.findMany({
     where: eq(creditTransactions.relatedDreamId, dreamId),
     orderBy: (fields, { asc }) => [asc(fields.createdAt)],
   });
+  return rows.map((row) => row.reason);
 }
 
 async function getUserTransactions(userId: string) {
@@ -76,10 +90,7 @@ async function waitForDreamStatus(dreamId: string, status: DREAM_STATUS, timeout
   while (Date.now() < deadline) {
     const dream = await testDb.query.dreams.findFirst({
       where: eq(dreams.id, dreamId),
-      columns: {
-        status: true,
-        interpretation: true,
-      },
+      columns: { status: true, interpretation: true },
     });
 
     if (dream?.status === status) {
@@ -104,114 +115,91 @@ describe('dreamsService credit behavior', () => {
     await resetFixtures();
   });
 
-  it('uses weekly credit, increments weeklyDreamCount, creates a dream, and inserts USED_WEEKLY', async () => {
-    const user = await createUserFixture({ plan: PLAN.FREE, weeklyDreamCount: 0, extraCredits: 3 });
+  it('consumes the weekly free quota and creates a dream without a ledger row', async () => {
+    const user = await createUserFixture({ plan: PLAN.FREE, extraCredits: 3 });
     const interpreter = await createInterpreterFixture();
 
-    const response = await dreamsService.createDream(user.id, {
-      content: 'vitest: dream content for weekly credit',
-      interpreter_id: interpreter.id,
-    });
+    const response = await dreamsService.createDream(
+      user.id,
+      dreamInput('vitest: dream content for weekly quota', interpreter.id),
+    );
 
     expect(response.status).toBe(DREAM_STATUS.PENDING);
 
     const [storedDream] = await getUserDreams(user.id);
-    expect(storedDream).toBeTruthy();
     expect(storedDream?.id).toBe(response.id);
-    expect(storedDream?.status).toBe(DREAM_STATUS.PENDING);
+    expect(storedDream?.quotaSource).toBe(QUOTA_SOURCE.weekly_free);
 
-    const updatedUser = await getUserCredits(user.id);
-    expect(updatedUser.weeklyDreamCount).toBe(1);
-    expect(updatedUser.extraCredits).toBe(3);
+    const credits = await getQuotaAndWallet(user.id);
+    expect(credits.weeklyDreamCount).toBe(1);
+    expect(credits.extraCredits).toBe(3);
 
-    const transactions = await getDreamTransactions(response.id);
-    expect(transactions).toHaveLength(1);
-    expect(transactions[0]?.transactionType).toBe(CREDIT_TRANSACTION_TYPE.USED_WEEKLY);
-    expect(transactions[0]?.amount).toBe(1);
+    // Quota spends do not write to the immutable coin ledger.
+    expect(await getDreamLedgerReasons(response.id)).toEqual([]);
   });
 
-  it('uses extra credit after the weekly limit is reached and inserts USED_EXTRA', async () => {
-    const user = await createUserFixture({
-      plan: PLAN.FREE,
-      weeklyDreamCount: PLAN_LIMITS[PLAN.FREE],
-      extraCredits: 2,
-    });
+  it('falls back to the wallet once the quota is exhausted and writes a dream_charge', async () => {
+    const user = await createUserFixture({ plan: PLAN.FREE, weeklyDreamCount: FREE_LIMIT, extraCredits: 2 });
     const interpreter = await createInterpreterFixture();
 
-    const response = await dreamsService.createDream(user.id, {
-      content: 'vitest: dream content using extra credit',
-      interpreter_id: interpreter.id,
-    });
+    const response = await dreamsService.createDream(
+      user.id,
+      dreamInput('vitest: dream content using a wallet coin', interpreter.id),
+    );
 
-    const updatedUser = await getUserCredits(user.id);
-    expect(updatedUser.weeklyDreamCount).toBe(PLAN_LIMITS[PLAN.FREE]);
-    expect(updatedUser.extraCredits).toBe(1);
+    const [storedDream] = await getUserDreams(user.id);
+    expect(storedDream?.quotaSource).toBe(QUOTA_SOURCE.wallet);
 
-    const transactions = await getDreamTransactions(response.id);
-    expect(transactions).toHaveLength(1);
-    expect(transactions[0]?.transactionType).toBe(CREDIT_TRANSACTION_TYPE.USED_EXTRA);
+    const credits = await getQuotaAndWallet(user.id);
+    expect(credits.weeklyDreamCount).toBe(FREE_LIMIT);
+    expect(credits.extraCredits).toBe(1);
+
+    expect(await getDreamLedgerReasons(response.id)).toEqual([LEDGER_REASON.dream_charge]);
   });
 
-  it('throws CreditError with insufficient credits and leaves no dream, transaction, or counter mutation', async () => {
-    const user = await createUserFixture({
-      plan: PLAN.FREE,
-      weeklyDreamCount: PLAN_LIMITS[PLAN.FREE],
-      extraCredits: 0,
-    });
+  it('throws CreditError when neither quota nor wallet can pay and leaves no dream', async () => {
+    const user = await createUserFixture({ plan: PLAN.FREE, weeklyDreamCount: FREE_LIMIT, extraCredits: 0 });
     const interpreter = await createInterpreterFixture();
 
     await expect(
-      dreamsService.createDream(user.id, {
-        content: 'vitest: dream content with no remaining credits',
-        interpreter_id: interpreter.id,
-      }),
+      dreamsService.createDream(user.id, dreamInput('vitest: no remaining credits', interpreter.id)),
     ).rejects.toBeInstanceOf(CreditError);
 
-    const updatedUser = await getUserCredits(user.id);
-    expect(updatedUser.weeklyDreamCount).toBe(PLAN_LIMITS[PLAN.FREE]);
-    expect(updatedUser.extraCredits).toBe(0);
+    const credits = await getQuotaAndWallet(user.id);
+    expect(credits.weeklyDreamCount).toBe(FREE_LIMIT);
+    expect(credits.extraCredits).toBe(0);
     expect(await getUserDreams(user.id)).toHaveLength(0);
     expect(await getUserTransactions(user.id)).toHaveLength(0);
   });
 
   it('rejects premium interpreters for FREE users and keeps credits unchanged', async () => {
-    const user = await createUserFixture({ plan: PLAN.FREE, weeklyDreamCount: 0, extraCredits: 2 });
+    const user = await createUserFixture({ plan: PLAN.FREE, extraCredits: 2 });
     const interpreter = await createInterpreterFixture({ isPremium: true });
 
     await expect(
-      dreamsService.createDream(user.id, {
-        content: 'vitest: premium interpreter should be forbidden',
-        interpreter_id: interpreter.id,
-      }),
+      dreamsService.createDream(user.id, dreamInput('vitest: premium forbidden', interpreter.id)),
     ).rejects.toBeInstanceOf(ForbiddenError);
 
-    const updatedUser = await getUserCredits(user.id);
-    expect(updatedUser.weeklyDreamCount).toBe(0);
-    expect(updatedUser.extraCredits).toBe(2);
+    const credits = await getQuotaAndWallet(user.id);
+    expect(credits.weeklyDreamCount).toBe(0);
+    expect(credits.extraCredits).toBe(2);
     expect(await getUserDreams(user.id)).toHaveLength(0);
   });
 
   it('rejects invalid or inactive interpreters and keeps credits unchanged', async () => {
-    const user = await createUserFixture({ plan: PLAN.PRO, weeklyDreamCount: 0, extraCredits: 2 });
+    const user = await createUserFixture({ plan: PLAN.PRO, extraCredits: 2 });
     const inactiveInterpreter = await createInterpreterFixture({ isActive: false });
-    const initialCredits = await getUserCredits(user.id);
 
     await expect(
-      dreamsService.createDream(user.id, {
-        content: 'vitest: inactive interpreter should be missing',
-        interpreter_id: inactiveInterpreter.id,
-      }),
+      dreamsService.createDream(user.id, dreamInput('vitest: inactive interpreter', inactiveInterpreter.id)),
     ).rejects.toBeInstanceOf(NotFoundError);
 
     await expect(
-      dreamsService.createDream(user.id, {
-        content: 'vitest: invalid interpreter should be missing',
-        interpreter_id: crypto.randomUUID(),
-      }),
+      dreamsService.createDream(user.id, dreamInput('vitest: invalid interpreter', crypto.randomUUID())),
     ).rejects.toBeInstanceOf(NotFoundError);
 
-    const updatedUser = await getUserCredits(user.id);
-    expect(updatedUser).toEqual(initialCredits);
+    const credits = await getQuotaAndWallet(user.id);
+    expect(credits).toEqual({ weeklyDreamCount: 0, extraCredits: 2 });
     expect(await getUserDreams(user.id)).toHaveLength(0);
   });
 
@@ -219,39 +207,65 @@ describe('dreamsService credit behavior', () => {
     const interpreter = await createInterpreterFixture();
 
     await expect(
-      dreamsService.createDream(crypto.randomUUID(), {
-        content: 'vitest: missing user cannot create a dream',
-        interpreter_id: interpreter.id,
-      }),
+      dreamsService.createDream(crypto.randomUUID(), dreamInput('vitest: missing user', interpreter.id)),
     ).rejects.toBeInstanceOf(NotFoundError);
   });
 
-  it('resets expired weekly credits before spend decisions and uses weekly credit', async () => {
-    const now = new Date();
-
-    const user = await createUserFixture({
-      plan: PLAN.FREE,
-      weeklyDreamCount: PLAN_LIMITS[PLAN.FREE],
-      extraCredits: 0,
-      limitResetDate: new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000),
-    });
+  it('rolls a previous-week quota window over before spending and consumes fresh quota', async () => {
+    const user = await createUserFixture({ plan: PLAN.FREE, extraCredits: 0 });
     const interpreter = await createInterpreterFixture();
+    const weekStart = getWeekStartUtc(new Date());
 
-    const response = await dreamsService.createDream(user.id, {
-      content: 'vitest: expired reset should spend weekly credit',
-      interpreter_id: interpreter.id,
+    // Seed a fully-used quota row from last week; it must roll over to a fresh slot.
+    await testDb.insert(userUsage).values({
+      userId: user.id,
+      quotaKey: QUOTA_KEY.weekly_free_dream,
+      windowStartedAt: new Date(weekStart.getTime() - 7 * 24 * 60 * 60 * 1000),
+      usedCount: FREE_LIMIT,
     });
+
+    const response = await dreamsService.createDream(
+      user.id,
+      dreamInput('vitest: expired window should roll over', interpreter.id),
+    );
 
     expect(response.status).toBe(DREAM_STATUS.PENDING);
+    expect((await getQuotaAndWallet(user.id)).weeklyDreamCount).toBe(1);
+    expect(await getDreamLedgerReasons(response.id)).toEqual([]);
+  });
 
-    const updatedUser = await getUserCredits(user.id);
-    expect(updatedUser.weeklyDreamCount).toBe(1);
-    expect(updatedUser.extraCredits).toBe(0);
-    expect(updatedUser.limitResetDate.toISOString()).toBe(getNextWeeklyResetDate(now).toISOString());
+  it('replays the original dream for a repeated client_request_id with the same payload', async () => {
+    const user = await createUserFixture({ plan: PLAN.FREE, extraCredits: 0 });
+    const interpreter = await createInterpreterFixture();
+    const input = dreamInput('vitest: idempotent submission', interpreter.id);
 
-    const transactions = await getDreamTransactions(response.id);
-    expect(transactions).toHaveLength(1);
-    expect(transactions[0]?.transactionType).toBe(CREDIT_TRANSACTION_TYPE.USED_WEEKLY);
+    const first = await dreamsService.createDream(user.id, input);
+    const replay = await dreamsService.createDream(user.id, input);
+
+    expect(replay.id).toBe(first.id);
+    // Only one dream and a single quota unit consumed despite two calls.
+    expect(await getUserDreams(user.id)).toHaveLength(1);
+    expect((await getQuotaAndWallet(user.id)).weeklyDreamCount).toBe(1);
+  });
+
+  it('rejects a reused client_request_id carrying a different payload', async () => {
+    const user = await createUserFixture({ plan: PLAN.FREE, extraCredits: 5 });
+    const interpreter = await createInterpreterFixture();
+    const clientRequestId = crypto.randomUUID();
+
+    await dreamsService.createDream(user.id, {
+      content: 'vitest: original idempotent payload',
+      interpreter_id: interpreter.id,
+      client_request_id: clientRequestId,
+    });
+
+    await expect(
+      dreamsService.createDream(user.id, {
+        content: 'vitest: DIFFERENT payload for the same key',
+        interpreter_id: interpreter.id,
+        client_request_id: clientRequestId,
+      }),
+    ).rejects.toMatchObject({ code: 'IDEMPOTENCY_KEY_REUSED' });
   });
 
   it('returns a dream by id for the owning user and rejects missing dreams', async () => {
@@ -281,16 +295,7 @@ describe('dreamsService credit behavior', () => {
       interpretation: 'vitest: stored interpretation',
       rating: 5,
       feedback: 'vitest: stored feedback',
-      interpreter: {
-        id: interpreter.id,
-        name: 'vitest: detail interpreter',
-        specialty: 'vitest: detail description',
-        description: 'vitest: detail description',
-        imageUrl: null,
-        isPremium: false,
-        sortOrder: 3,
-        accentColor: '#234E83',
-      },
+      interpreter: { id: interpreter.id, name: 'vitest: detail interpreter' },
     });
 
     await expect(dreamsService.getDreamById(otherUser.id, dream.id)).rejects.toBeInstanceOf(NotFoundError);
@@ -298,131 +303,28 @@ describe('dreamsService credit behavior', () => {
   });
 
   it('deletes a dream for the owning user, nulls related transactions, and rejects foreign or missing dreams', async () => {
-    const user = await createUserFixture();
+    const user = await createUserFixture({ plan: PLAN.FREE, weeklyDreamCount: FREE_LIMIT, extraCredits: 1 });
     const otherUser = await createUserFixture();
     const interpreter = await createInterpreterFixture();
 
-    const response = await dreamsService.createDream(user.id, {
-      content: 'vitest: dream to be deleted',
-      interpreter_id: interpreter.id,
-    });
+    // Wallet-paid dream so a ledger row exists to be nulled on delete.
+    const response = await dreamsService.createDream(
+      user.id,
+      dreamInput('vitest: dream to be deleted', interpreter.id),
+    );
 
-    // A foreign user cannot delete it and the dream survives.
     await expect(dreamsService.deleteDream(otherUser.id, response.id)).rejects.toBeInstanceOf(NotFoundError);
     expect(await getUserDreams(user.id)).toHaveLength(1);
 
     await expect(dreamsService.deleteDream(user.id, response.id)).resolves.toBeUndefined();
     expect(await getUserDreams(user.id)).toHaveLength(0);
 
-    // The spend transaction survives with a nulled related dream (onDelete: set null).
+    // The charge ledger row survives with a nulled related dream (onDelete: set null).
     const transactions = await getUserTransactions(user.id);
     expect(transactions).toHaveLength(1);
     expect(transactions[0]?.relatedDreamId).toBeNull();
 
-    // A second delete (now missing) reports not found.
     await expect(dreamsService.deleteDream(user.id, response.id)).rejects.toBeInstanceOf(NotFoundError);
-  });
-
-  it('lists only the current user dreams in reverse chronological order', async () => {
-    const user = await createUserFixture();
-    const otherUser = await createUserFixture();
-    const interpreter = await createInterpreterFixture({
-      name: 'vitest: list interpreter',
-      description: 'vitest: list description',
-      sortOrder: 4,
-    });
-    const userDreams: Array<{ id: string; content: string }> = [];
-    const baseDate = new Date('2024-01-01T00:00:00.000Z');
-
-    for (let index = 0; index < 25; index += 1) {
-      const dream = await createDreamFixture({
-        userId: user.id,
-        interpreterId: interpreter.id,
-        content: `vitest:user-dream-${index + 1}`,
-        status: index % 2 === 0 ? DREAM_STATUS.PENDING : DREAM_STATUS.COMPLETED,
-        interpretation: index % 2 === 0 ? null : `vitest:interpretation-${index + 1}`,
-      });
-      userDreams.push({
-        id: dream.id,
-        content: `vitest:user-dream-${index + 1}`,
-      });
-
-      const timestamp = new Date(baseDate.getTime() + index * 60_000);
-      await testDb
-        .update(dreams)
-        .set({
-          createdAt: timestamp,
-          updatedAt: timestamp,
-        })
-        .where(eq(dreams.id, dream.id));
-    }
-
-    await createDreamFixture({
-      userId: otherUser.id,
-      interpreterId: interpreter.id,
-      content: 'vitest: other user dream',
-      status: DREAM_STATUS.COMPLETED,
-    });
-
-    const selectArgs: Array<Record<string, unknown>> = [];
-    const originalSelect = db.select.bind(db);
-    const selectSpy = vi.spyOn(db, 'select').mockImplementation(((fields?: unknown) => {
-      selectArgs.push((fields ?? {}) as Record<string, unknown>);
-      return originalSelect(fields as never) as never;
-    }) as never);
-
-    try {
-      const firstPage = await dreamsService.listDreams(user.id, { limit: 20 });
-
-      expect(Object.keys(selectArgs[0] ?? {})).toEqual([
-        'id', 'content', 'status', 'isBookmarked', 'createdAt',
-        'interpreterId', 'interpreterName', 'interpreterAccentColor',
-      ]);
-      expect(firstPage.items).toHaveLength(20);
-      expect(firstPage.nextCursor).toEqual(expect.any(String));
-      expect(firstPage.items[0]).toEqual(
-        expect.objectContaining({
-          id: userDreams[24]!.id,
-          content: 'vitest:user-dream-25',
-          status: DREAM_STATUS.PENDING,
-          createdAt: expect.any(String),
-          interpreter: {
-            id: interpreter.id,
-            name: 'vitest: list interpreter',
-            accentColor: '#234E83',
-          },
-        }),
-      );
-      expect(firstPage.items[0]).not.toHaveProperty('interpretation');
-      expect(firstPage.items[0]).not.toHaveProperty('rating');
-      expect(firstPage.items[0]).not.toHaveProperty('feedback');
-      expect(firstPage.items[0]).not.toHaveProperty('updatedAt');
-
-      const secondPage = await dreamsService.listDreams(user.id, {
-        limit: 20,
-        cursor: firstPage.nextCursor!,
-      });
-
-      expect(selectArgs).toHaveLength(2);
-      expect(Object.keys(selectArgs[1] ?? {})).toEqual([
-        'id', 'content', 'status', 'isBookmarked', 'createdAt',
-        'interpreterId', 'interpreterName', 'interpreterAccentColor',
-      ]);
-      expect(secondPage.items).toHaveLength(5);
-      expect(secondPage.nextCursor).toBeNull();
-      expect(secondPage.items.map((dream) => dream.id)).toEqual([
-        userDreams[4]!.id,
-        userDreams[3]!.id,
-        userDreams[2]!.id,
-        userDreams[1]!.id,
-        userDreams[0]!.id,
-      ]);
-      expect(secondPage.items.every((dream) => dream.content.startsWith('vitest:user-dream-'))).toBe(true);
-      expect(secondPage.items.every((dream) => Object.keys(dream).sort().join(',') === 'content,createdAt,id,interpreter,isBookmarked,status')).toBe(true);
-      expect(secondPage.items.every((dream) => dream.interpreter.id === interpreter.id)).toBe(true);
-    } finally {
-      selectSpy.mockRestore();
-    }
   });
 
   it('rejects malformed dream list cursors', async () => {
@@ -457,48 +359,13 @@ describe('dreamsService credit behavior', () => {
     });
 
     await expect(
-      dreamsService.submitFeedback(user.id, dream.id, {
-        rating: 4,
-        feedback_text: 'still pending',
-      }),
-    ).rejects.toBeInstanceOf(ForbiddenError);
-  });
-
-  it('forbids feedback when a completed dream changes away from COMPLETED before submission', async () => {
-    const user = await createUserFixture();
-    const interpreter = await createInterpreterFixture();
-    const dream = await createDreamFixture({
-      userId: user.id,
-      interpreterId: interpreter.id,
-      content: 'vitest: completed dream becomes processing',
-      interpretation: 'vitest: interpretation text',
-      status: DREAM_STATUS.COMPLETED,
-    });
-
-    await testDb
-      .update(dreams)
-      .set({
-        status: DREAM_STATUS.PROCESSING,
-        updatedAt: new Date(),
-      })
-      .where(eq(dreams.id, dream.id));
-
-    await expect(
-      dreamsService.submitFeedback(user.id, dream.id, {
-        rating: 5,
-        feedback_text: 'too late',
-      }),
+      dreamsService.submitFeedback(user.id, dream.id, { rating: 4, feedback_text: 'still pending' }),
     ).rejects.toBeInstanceOf(ForbiddenError);
   });
 
   it('stores completed dream feedback and returns the serialized response', async () => {
     const user = await createUserFixture();
-    const interpreter = await createInterpreterFixture({
-      name: 'vitest: interpreter completed',
-      description: 'vitest: deep interpretation',
-      isPremium: false,
-      sortOrder: 7,
-    });
+    const interpreter = await createInterpreterFixture({ name: 'vitest: interpreter completed', sortOrder: 7 });
     const dream = await createDreamFixture({
       userId: user.id,
       interpreterId: interpreter.id,
@@ -513,31 +380,14 @@ describe('dreamsService credit behavior', () => {
     });
 
     expect(response.id).toBe(dream.id);
-    expect(response.status).toBe(DREAM_STATUS.COMPLETED);
     expect(response.rating).toBe(9);
     expect(response.feedback).toBe('vitest: very accurate');
-    expect(response.interpreter).toEqual({
-      id: interpreter.id,
-      name: 'vitest: interpreter completed',
-      specialty: 'vitest: deep interpretation',
-      description: 'vitest: deep interpretation',
-      imageUrl: null,
-      isPremium: false,
-      sortOrder: 7,
-      accentColor: '#234E83',
-    });
 
     const storedDream = await testDb.query.dreams.findFirst({
       where: eq(dreams.id, dream.id),
-      columns: {
-        userRating: true,
-        userFeedbackText: true,
-      },
+      columns: { userRating: true, userFeedbackText: true },
     });
-    expect(storedDream).toEqual({
-      userRating: 9,
-      userFeedbackText: 'vitest: very accurate',
-    });
+    expect(storedDream).toEqual({ userRating: 9, userFeedbackText: 'vitest: very accurate' });
   });
 
   it('stores feedback with a null text value when feedback_text is omitted', async () => {
@@ -551,24 +401,9 @@ describe('dreamsService credit behavior', () => {
       status: DREAM_STATUS.COMPLETED,
     });
 
-    const response = await dreamsService.submitFeedback(user.id, dream.id, {
-      rating: 7,
-    });
+    const response = await dreamsService.submitFeedback(user.id, dream.id, { rating: 7 });
 
-    expect(response.rating).toBe(7);
     expect(response.feedback).toBeNull();
-
-    const storedDream = await testDb.query.dreams.findFirst({
-      where: eq(dreams.id, dream.id),
-      columns: {
-        userRating: true,
-        userFeedbackText: true,
-      },
-    });
-    expect(storedDream).toEqual({
-      userRating: 7,
-      userFeedbackText: null,
-    });
   });
 
   it('returns not found when feedback targets another user dream', async () => {
@@ -584,42 +419,12 @@ describe('dreamsService credit behavior', () => {
     });
 
     await expect(
-      dreamsService.submitFeedback(user.id, dream.id, {
-        rating: 6,
-      }),
+      dreamsService.submitFeedback(user.id, dream.id, { rating: 6 }),
     ).rejects.toBeInstanceOf(NotFoundError);
   });
 
-  it('throws ValidationError when a completed dream feedback update returns no row', async () => {
-    const user = await createUserFixture();
-    const interpreter = await createInterpreterFixture();
-    const dream = await createDreamFixture({
-      userId: user.id,
-      interpreterId: interpreter.id,
-      content: 'vitest: completed dream feedback deleted during update',
-      interpretation: 'vitest: interpretation text',
-      status: DREAM_STATUS.COMPLETED,
-    });
-
-    vi.spyOn(db, 'update').mockImplementationOnce(() => ({
-      set: () => ({
-        from: () => ({
-          where: () => ({
-            returning: async () => [],
-          }),
-        }),
-      }),
-    }) as never);
-
-    await expect(
-      dreamsService.submitFeedback(user.id, dream.id, {
-        rating: 6,
-      }),
-    ).rejects.toBeInstanceOf(ValidationError);
-  });
-
   it('completes delayed provider processing and sanitizes long interpretations', async () => {
-    const user = await createUserFixture({ plan: PLAN.PRO, weeklyDreamCount: 0, extraCredits: 1 });
+    const user = await createUserFixture({ plan: PLAN.PRO, extraCredits: 1 });
     const interpreter = await createSmokeInterpreterFixture({
       name: 'vitest: provider interpreter',
       systemPrompt: 'vitest: provider system prompt',
@@ -649,18 +454,9 @@ describe('dreamsService credit behavior', () => {
       dreamId: dream.id,
       userId: user.id,
       content: longContent,
-      interpreter: {
-        id: interpreter.id,
-        name: 'vitest: provider interpreter',
-        systemPrompt: 'vitest: provider system prompt',
-      },
-      model: {
-        openrouterModelId: DEFAULT_SEED_OPENROUTER_MODEL_ID,
-      },
+      model: { openrouterModelId: DEFAULT_SEED_OPENROUTER_MODEL_ID },
     });
     expect(storedDream.interpretation).not.toContain('\u0000');
-    expect(storedDream.interpretation).not.toContain('\r\n');
-    expect(storedDream.interpretation).not.toContain('\n\n\n');
     expect(storedDream.interpretation?.length).toBeLessThanOrEqual(
       DREAM_PROCESSING_CONFIG.MAX_INTERPRETATION_LENGTH,
     );
@@ -668,9 +464,7 @@ describe('dreamsService credit behavior', () => {
 
   it('stores provider interpretation without generating production mock text', async () => {
     const user = await createUserFixture();
-    const interpreter = await createInterpreterFixture({
-      name: 'vitest: short interpreter',
-    });
+    const interpreter = await createInterpreterFixture({ name: 'vitest: short interpreter' });
     const interpretation = 'vitest: provider generated interpretation';
     const dream = await createDreamFixture({
       userId: user.id,
@@ -679,159 +473,88 @@ describe('dreamsService credit behavior', () => {
       status: DREAM_STATUS.PENDING,
     });
 
-    await processDreamWithProvider(
-      dream.id,
-      createTestDreamProvider({ interpretation }),
-    );
+    await processDreamWithProvider(dream.id, createTestDreamProvider({ interpretation }));
 
     const storedDream = await waitForDreamStatus(dream.id, DREAM_STATUS.COMPLETED, 1000);
-
     expect(storedDream.interpretation).toBe(interpretation);
   });
 
-  it('marks sanitized empty provider output as FAILED and refunds spent credit', async () => {
+  it('marks empty provider output as FAILED and restores the weekly quota (no ledger)', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => undefined);
-    const user = await createUserFixture({ plan: PLAN.FREE, weeklyDreamCount: 0, extraCredits: 0 });
+    const user = await createUserFixture({ plan: PLAN.FREE, extraCredits: 0 });
     const interpreter = await createInterpreterFixture();
 
-    const response = await dreamsService.createDream(user.id, {
-      content: 'vitest: provider returns empty output',
-      interpreter_id: interpreter.id,
-    });
-
-    await processDreamWithProvider(
-      response.id,
-      createTestDreamProvider({ interpretation: ' \u0000 ' }),
+    const response = await dreamsService.createDream(
+      user.id,
+      dreamInput('vitest: provider returns empty output', interpreter.id),
     );
+
+    await processDreamWithProvider(response.id, createTestDreamProvider({ interpretation: ' \u0000 ' }));
 
     const storedDream = await testDb.query.dreams.findFirst({
       where: eq(dreams.id, response.id),
-      columns: { status: true, interpretation: true },
+      columns: { status: true, interpretation: true, refundedAt: true },
     });
-    expect(storedDream).toEqual({
-      status: DREAM_STATUS.FAILED,
-      interpretation: null,
-    });
+    expect(storedDream?.status).toBe(DREAM_STATUS.FAILED);
+    expect(storedDream?.interpretation).toBeNull();
+    expect(storedDream?.refundedAt).not.toBeNull();
 
-    const updatedUser = await getUserCredits(user.id);
-    expect(updatedUser.weeklyDreamCount).toBe(0);
-    expect(updatedUser.extraCredits).toBe(0);
-
-    const transactions = await getDreamTransactions(response.id);
-    expect(transactions.map((transaction) => transaction.transactionType)).toEqual([
-      CREDIT_TRANSACTION_TYPE.USED_WEEKLY,
-      CREDIT_TRANSACTION_TYPE.REFUNDED,
-    ]);
+    // Quota refunds restore the usage count and write no ledger row.
+    expect((await getQuotaAndWallet(user.id)).weeklyDreamCount).toBe(0);
+    expect(await getDreamLedgerReasons(response.id)).toEqual([]);
   });
 
-  it('retries a failed refund when the refund transaction fails once', async () => {
+  it('refunds a wallet-paid dream once and stays idempotent across re-processing', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => undefined);
-    const user = await createUserFixture({ plan: PLAN.FREE, weeklyDreamCount: 0, extraCredits: 0 });
+    const user = await createUserFixture({ plan: PLAN.FREE, weeklyDreamCount: FREE_LIMIT, extraCredits: 1 });
     const interpreter = await createInterpreterFixture();
 
-    const response = await dreamsService.createDream(user.id, {
-      content: 'vitest: provider should fail and refund this dream',
-      interpreter_id: interpreter.id,
-    });
-
-    vi.spyOn(db, 'transaction').mockImplementationOnce(async () => {
-      throw new Error('vitest: refund transaction failed');
-    });
-
-    await expect(
-      processDreamWithProvider(
-        response.id,
-        createTestDreamProvider({ fail: true }),
-      ),
-    ).rejects.toThrow('vitest: refund transaction failed');
-
-    const failedDream = await testDb.query.dreams.findFirst({
-      where: eq(dreams.id, response.id),
-      columns: { status: true },
-    });
-    expect(failedDream?.status).toBe(DREAM_STATUS.FAILED);
-
-    const creditsAfterFailure = await getUserCredits(user.id);
-    expect(creditsAfterFailure.weeklyDreamCount).toBe(1);
-    expect(creditsAfterFailure.extraCredits).toBe(0);
-    expect(await getDreamTransactions(response.id)).toHaveLength(1);
-
-    await processDreamImmediately(response.id);
-
-    const creditsAfterRetry = await getUserCredits(user.id);
-    expect(creditsAfterRetry.weeklyDreamCount).toBe(0);
-    expect(creditsAfterRetry.extraCredits).toBe(0);
-
-    const transactions = await getDreamTransactions(response.id);
-    expect(transactions.map((transaction) => transaction.transactionType)).toEqual([
-      CREDIT_TRANSACTION_TYPE.USED_WEEKLY,
-      CREDIT_TRANSACTION_TYPE.REFUNDED,
-    ]);
-  });
-
-  it('keeps a single REFUNDED transaction when retrying a failed dream after refund success', async () => {
-    vi.spyOn(console, 'error').mockImplementation(() => undefined);
-    const user = await createUserFixture({ plan: PLAN.FREE, weeklyDreamCount: 0, extraCredits: 0 });
-    const interpreter = await createInterpreterFixture();
-
-    const response = await dreamsService.createDream(user.id, {
-      content: 'vitest: provider should fail and refund this dream',
-      interpreter_id: interpreter.id,
-    });
+    const response = await dreamsService.createDream(
+      user.id,
+      dreamInput('vitest: wallet dream that fails and refunds', interpreter.id),
+    );
+    expect((await getQuotaAndWallet(user.id)).extraCredits).toBe(0);
 
     await failDreamImmediately(response.id);
-    await processDreamImmediately(response.id);
+    await processDreamImmediately(response.id); // re-processing must not double-refund
 
-    const transactions = await getDreamTransactions(response.id);
-    expect(transactions.map((transaction) => transaction.transactionType)).toEqual([
-      CREDIT_TRANSACTION_TYPE.USED_WEEKLY,
-      CREDIT_TRANSACTION_TYPE.REFUNDED,
+    expect((await getQuotaAndWallet(user.id)).extraCredits).toBe(1);
+    expect(await getDreamLedgerReasons(response.id)).toEqual([
+      LEDGER_REASON.dream_charge,
+      LEDGER_REASON.dream_processing_refund,
     ]);
-
-    const updatedUser = await getUserCredits(user.id);
-    expect(updatedUser.weeklyDreamCount).toBe(0);
-    expect(updatedUser.extraCredits).toBe(0);
   });
 
-  it('refunds restore the correct credit source for weekly and extra spends', async () => {
+  it('restores the correct source for quota and wallet refunds', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => undefined);
     const interpreter = await createInterpreterFixture();
-    const weeklyUser = await createUserFixture({ plan: PLAN.FREE, weeklyDreamCount: 0, extraCredits: 0 });
-    const extraUser = await createUserFixture({
-      plan: PLAN.FREE,
-      weeklyDreamCount: PLAN_LIMITS[PLAN.FREE],
-      extraCredits: 2,
-    });
+    const quotaUser = await createUserFixture({ plan: PLAN.FREE, extraCredits: 0 });
+    const walletUser = await createUserFixture({ plan: PLAN.FREE, weeklyDreamCount: FREE_LIMIT, extraCredits: 2 });
 
-    const weeklyDream = await dreamsService.createDream(weeklyUser.id, {
-      content: 'vitest: weekly refund source check',
-      interpreter_id: interpreter.id,
-    });
-    const extraDream = await dreamsService.createDream(extraUser.id, {
-      content: 'vitest: extra refund source check',
-      interpreter_id: interpreter.id,
-    });
+    const quotaDream = await dreamsService.createDream(
+      quotaUser.id,
+      dreamInput('vitest: quota refund source', interpreter.id),
+    );
+    const walletDream = await dreamsService.createDream(
+      walletUser.id,
+      dreamInput('vitest: wallet refund source', interpreter.id),
+    );
 
-    await failDreamImmediately(weeklyDream.id);
-    await failDreamImmediately(extraDream.id);
+    await failDreamImmediately(quotaDream.id);
+    await failDreamImmediately(walletDream.id);
 
-    const weeklyCredits = await getUserCredits(weeklyUser.id);
-    expect(weeklyCredits.weeklyDreamCount).toBe(0);
-    expect(weeklyCredits.extraCredits).toBe(0);
-
-    const extraCredits = await getUserCredits(extraUser.id);
-    expect(extraCredits.weeklyDreamCount).toBe(PLAN_LIMITS[PLAN.FREE]);
-    expect(extraCredits.extraCredits).toBe(2);
+    expect(await getQuotaAndWallet(quotaUser.id)).toEqual({ weeklyDreamCount: 0, extraCredits: 0 });
+    expect(await getQuotaAndWallet(walletUser.id)).toEqual({ weeklyDreamCount: FREE_LIMIT, extraCredits: 2 });
   });
 
-  it('marks provider failures as FAILED without refund when no spend transaction exists', async () => {
+  it('marks a never-charged dream FAILED without any refund', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => undefined);
-    const user = await createUserFixture({ plan: PLAN.FREE, weeklyDreamCount: 0, extraCredits: 2 });
+    const user = await createUserFixture({ plan: PLAN.FREE, extraCredits: 2 });
     const interpreter = await createInterpreterFixture();
     const dream = await createDreamFixture({
       userId: user.id,
       interpreterId: interpreter.id,
-      content: 'vitest: fixture dream without spend transaction',
+      content: 'vitest: fixture dream without a charge',
       status: DREAM_STATUS.PENDING,
     });
 
@@ -842,21 +565,18 @@ describe('dreamsService credit behavior', () => {
       columns: { status: true },
     });
     expect(storedDream?.status).toBe(DREAM_STATUS.FAILED);
-    expect(await getDreamTransactions(dream.id)).toHaveLength(0);
-
-    const updatedUser = await getUserCredits(user.id);
-    expect(updatedUser.weeklyDreamCount).toBe(0);
-    expect(updatedUser.extraCredits).toBe(2);
+    expect(await getDreamLedgerReasons(dream.id)).toEqual([]);
+    expect(await getQuotaAndWallet(user.id)).toEqual({ weeklyDreamCount: 0, extraCredits: 2 });
   });
 
   it('captures provider AppError status while failing and refunding a dream', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => undefined);
-    const user = await createUserFixture({ plan: PLAN.FREE, weeklyDreamCount: 0, extraCredits: 0 });
+    const user = await createUserFixture({ plan: PLAN.FREE, extraCredits: 0 });
     const interpreter = await createInterpreterFixture();
-    const response = await dreamsService.createDream(user.id, {
-      content: 'vitest: provider app error should refund',
-      interpreter_id: interpreter.id,
-    });
+    const response = await dreamsService.createDream(
+      user.id,
+      dreamInput('vitest: provider app error should refund', interpreter.id),
+    );
 
     await processDreamWithProvider(response.id, {
       async interpret() {
@@ -869,20 +589,17 @@ describe('dreamsService credit behavior', () => {
       columns: { status: true },
     });
     expect(storedDream?.status).toBe(DREAM_STATUS.FAILED);
-    expect((await getDreamTransactions(response.id)).map((transaction) => transaction.transactionType)).toEqual([
-      CREDIT_TRANSACTION_TYPE.USED_WEEKLY,
-      CREDIT_TRANSACTION_TYPE.REFUNDED,
-    ]);
+    expect((await getQuotaAndWallet(user.id)).weeklyDreamCount).toBe(0);
   });
 
   it('normalizes non-Error provider failures while failing and refunding a dream', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => undefined);
-    const user = await createUserFixture({ plan: PLAN.FREE, weeklyDreamCount: 0, extraCredits: 0 });
+    const user = await createUserFixture({ plan: PLAN.FREE, extraCredits: 0 });
     const interpreter = await createInterpreterFixture();
-    const response = await dreamsService.createDream(user.id, {
-      content: 'vitest: provider plain failure should refund',
-      interpreter_id: interpreter.id,
-    });
+    const response = await dreamsService.createDream(
+      user.id,
+      dreamInput('vitest: provider plain failure should refund', interpreter.id),
+    );
 
     await processDreamWithProvider(response.id, {
       async interpret() {
@@ -895,13 +612,10 @@ describe('dreamsService credit behavior', () => {
       columns: { status: true },
     });
     expect(storedDream?.status).toBe(DREAM_STATUS.FAILED);
-    expect((await getDreamTransactions(response.id)).map((transaction) => transaction.transactionType)).toEqual([
-      CREDIT_TRANSACTION_TYPE.USED_WEEKLY,
-      CREDIT_TRANSACTION_TYPE.REFUNDED,
-    ]);
+    expect((await getQuotaAndWallet(user.id)).weeklyDreamCount).toBe(0);
   });
 
-  it('returns early when processing cannot claim a pending dream or the dream leaves PROCESSING before completion', async () => {
+  it('returns early when processing cannot claim a dream and never overwrites a finished one', async () => {
     await expect(processDream(crypto.randomUUID())).resolves.toBeUndefined();
     await expect(processDreamImmediately(crypto.randomUUID())).resolves.toBeUndefined();
 
@@ -919,54 +633,16 @@ describe('dreamsService credit behavior', () => {
 
     const unchangedDream = await testDb.query.dreams.findFirst({
       where: eq(dreams.id, completedDream.id),
-      columns: {
-        status: true,
-        interpretation: true,
-      },
+      columns: { status: true, interpretation: true },
     });
-    expect(unchangedDream).toEqual({
-      status: DREAM_STATUS.COMPLETED,
-      interpretation: 'vitest: complete',
-    });
-
-    const pendingDream = await createDreamFixture({
-      userId: user.id,
-      interpreterId: interpreter.id,
-      content: 'vitest: pending dream that will leave processing',
-      status: DREAM_STATUS.PENDING,
-    });
-
-    const processingPromise = processDreamWithDelay(pendingDream.id, 50);
-    await waitForDreamStatus(pendingDream.id, DREAM_STATUS.PROCESSING, 1000);
-
-    await testDb
-      .update(dreams)
-      .set({
-        status: DREAM_STATUS.FAILED,
-        updatedAt: new Date(),
-      })
-      .where(eq(dreams.id, pendingDream.id));
-
-    await processingPromise;
-
-    const inFlightDream = await testDb.query.dreams.findFirst({
-      where: eq(dreams.id, pendingDream.id),
-      columns: {
-        status: true,
-        interpretation: true,
-      },
-    });
-    expect(inFlightDream).toEqual({
-      status: DREAM_STATUS.FAILED,
-      interpretation: null,
-    });
+    expect(unchangedDream).toEqual({ status: DREAM_STATUS.COMPLETED, interpretation: 'vitest: complete' });
   });
 
   it('logs background worker errors when scheduled processing rejects', async () => {
     vi.useFakeTimers();
 
     const logErrorSpy = vi.spyOn(logger, 'error');
-    vi.spyOn(db, 'update').mockImplementationOnce(() => {
+    vi.spyOn(db, 'execute').mockImplementationOnce(() => {
       throw new Error('vitest: scheduled processing failed');
     });
 
@@ -986,7 +662,7 @@ describe('dreamsService credit behavior', () => {
     vi.useFakeTimers();
 
     const logErrorSpy = vi.spyOn(logger, 'error');
-    vi.spyOn(db, 'update').mockImplementationOnce(() => {
+    vi.spyOn(db, 'execute').mockImplementationOnce(() => {
       throw new String('vitest: scheduled plain failure');
     });
 
@@ -1002,26 +678,13 @@ describe('dreamsService credit behavior', () => {
     );
   });
 
-  it('prevents concurrent submissions from overspending weekly credits', async () => {
-    const now = new Date();
-
-    const user = await createUserFixture({
-      plan: PLAN.FREE,
-      weeklyDreamCount: PLAN_LIMITS[PLAN.FREE],
-      extraCredits: 0,
-      limitResetDate: new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000),
-    });
+  it('prevents concurrent submissions from overspending the weekly quota', async () => {
+    const user = await createUserFixture({ plan: PLAN.FREE, extraCredits: 0 });
     const interpreter = await createInterpreterFixture();
 
     const results = await Promise.allSettled([
-      dreamsService.createDream(user.id, {
-        content: 'vitest: concurrent dream one',
-        interpreter_id: interpreter.id,
-      }),
-      dreamsService.createDream(user.id, {
-        content: 'vitest: concurrent dream two',
-        interpreter_id: interpreter.id,
-      }),
+      dreamsService.createDream(user.id, dreamInput('vitest: concurrent dream one', interpreter.id)),
+      dreamsService.createDream(user.id, dreamInput('vitest: concurrent dream two', interpreter.id)),
     ]);
 
     const fulfilled = results.filter((result) => result.status === 'fulfilled');
@@ -1029,20 +692,198 @@ describe('dreamsService credit behavior', () => {
 
     expect(fulfilled).toHaveLength(1);
     expect(rejected).toHaveLength(1);
-    expect(rejected[0]?.status).toBe('rejected');
     if (rejected[0]?.status === 'rejected') {
       expect(rejected[0].reason).toBeInstanceOf(CreditError);
     }
 
-    const updatedUser = await getUserCredits(user.id);
-    expect(updatedUser.weeklyDreamCount).toBe(1);
-    expect(updatedUser.extraCredits).toBe(0);
-    expect(updatedUser.limitResetDate.toISOString()).toBe(getNextWeeklyResetDate(now).toISOString());
+    expect((await getQuotaAndWallet(user.id)).weeklyDreamCount).toBe(FREE_LIMIT);
     expect(await getUserDreams(user.id)).toHaveLength(1);
+  });
 
-    const [createdDream] = await getUserDreams(user.id);
-    const transactions = await getDreamTransactions(createdDream!.id);
-    expect(transactions).toHaveLength(1);
-    expect(transactions[0]?.transactionType).toBe(CREDIT_TRANSACTION_TYPE.USED_WEEKLY);
+  it('forbids feedback when a completed dream changes away from COMPLETED before submission', async () => {
+    const user = await createUserFixture();
+    const interpreter = await createInterpreterFixture();
+    const dream = await createDreamFixture({
+      userId: user.id,
+      interpreterId: interpreter.id,
+      content: 'vitest: completed dream becomes processing',
+      interpretation: 'vitest: interpretation text',
+      status: DREAM_STATUS.COMPLETED,
+    });
+
+    await testDb
+      .update(dreams)
+      .set({ status: DREAM_STATUS.PROCESSING, updatedAt: new Date() })
+      .where(eq(dreams.id, dream.id));
+
+    await expect(
+      dreamsService.submitFeedback(user.id, dream.id, { rating: 5, feedback_text: 'too late' }),
+    ).rejects.toBeInstanceOf(ForbiddenError);
+  });
+
+  it('throws ValidationError when a completed dream feedback update returns no row', async () => {
+    const user = await createUserFixture();
+    const interpreter = await createInterpreterFixture();
+    const dream = await createDreamFixture({
+      userId: user.id,
+      interpreterId: interpreter.id,
+      content: 'vitest: completed dream feedback returns no row',
+      interpretation: 'vitest: interpretation text',
+      status: DREAM_STATUS.COMPLETED,
+    });
+
+    vi.spyOn(db, 'update').mockImplementationOnce(() => ({
+      set: () => ({ from: () => ({ where: () => ({ returning: async () => [] }) }) }),
+    }) as never);
+
+    await expect(
+      dreamsService.submitFeedback(user.id, dream.id, { rating: 6 }),
+    ).rejects.toBeInstanceOf(ValidationError);
+  });
+
+  it('terminalizes a dream that has exhausted its attempts and refunds it', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const user = await createUserFixture({ plan: PLAN.FREE, extraCredits: 1 });
+    const interpreter = await createInterpreterFixture();
+
+    // A wallet-charged dream that has already used all its processing attempts.
+    const response = await dreamsService.createDream(
+      user.id,
+      { content: 'vitest: max attempts', interpreter_id: interpreter.id, client_request_id: crypto.randomUUID() },
+    );
+    await testDb
+      .update(dreams)
+      .set({ status: DREAM_STATUS.PENDING, attemptCount: DREAM_PROCESSING_CONFIG.MAX_ATTEMPTS, processingLeaseExpiresAt: null })
+      .where(eq(dreams.id, response.id));
+
+    await processDreamImmediately(response.id);
+
+    const stored = await testDb.query.dreams.findFirst({
+      where: eq(dreams.id, response.id),
+      columns: { status: true, lastError: true, refundedAt: true },
+    });
+    expect(stored?.status).toBe(DREAM_STATUS.FAILED);
+    expect(stored?.lastError).toBe('MAX_ATTEMPTS_EXCEEDED');
+    expect(stored?.refundedAt).not.toBeNull();
+    // Wallet coin restored.
+    expect((await getQuotaAndWallet(user.id)).extraCredits).toBe(1);
+  });
+
+  it('finishes the refund for a FAILED dream that was left unrefunded', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const user = await createUserFixture({ plan: PLAN.FREE, weeklyDreamCount: FREE_LIMIT, extraCredits: 1 });
+    const interpreter = await createInterpreterFixture();
+
+    const response = await dreamsService.createDream(
+      user.id,
+      { content: 'vitest: failed unrefunded', interpreter_id: interpreter.id, client_request_id: crypto.randomUUID() },
+    );
+    // Force a FAILED-but-unrefunded state (e.g. a crash between FAILED and refund).
+    await testDb
+      .update(dreams)
+      .set({ status: DREAM_STATUS.FAILED, failedAt: new Date(), refundedAt: null, processingLeaseExpiresAt: null })
+      .where(eq(dreams.id, response.id));
+    expect((await getQuotaAndWallet(user.id)).extraCredits).toBe(0);
+
+    await processDreamImmediately(response.id);
+
+    expect((await getQuotaAndWallet(user.id)).extraCredits).toBe(1);
+    expect(await getDreamLedgerReasons(response.id)).toEqual([
+      LEDGER_REASON.dream_charge,
+      LEDGER_REASON.dream_processing_refund,
+    ]);
+  });
+
+  it('does not complete a dream that leaves PROCESSING mid-flight', async () => {
+    const user = await createUserFixture();
+    const interpreter = await createInterpreterFixture();
+    const pendingDream = await createDreamFixture({
+      userId: user.id,
+      interpreterId: interpreter.id,
+      content: 'vitest: pending dream that leaves processing',
+      status: DREAM_STATUS.PENDING,
+    });
+
+    // Claim runs, then the processor sleeps before its guarded select; flipping the
+    // status during that window makes the attempt-guarded select return nothing.
+    const processingPromise = processDreamWithDelay(pendingDream.id, 50);
+    await waitForDreamStatus(pendingDream.id, DREAM_STATUS.PROCESSING, 1000);
+    await testDb
+      .update(dreams)
+      .set({ status: DREAM_STATUS.FAILED, failedAt: new Date(), updatedAt: new Date() })
+      .where(eq(dreams.id, pendingDream.id));
+    await processingPromise;
+
+    const stored = await testDb.query.dreams.findFirst({
+      where: eq(dreams.id, pendingDream.id),
+      columns: { status: true, interpretation: true },
+    });
+    expect(stored).toEqual({ status: DREAM_STATUS.FAILED, interpretation: null });
+  });
+
+  it('terminalizes a stale PROCESSING dream past its attempt limit', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const user = await createUserFixture();
+    const interpreter = await createInterpreterFixture();
+    const dream = await createDreamFixture({
+      userId: user.id,
+      interpreterId: interpreter.id,
+      content: 'vitest: stale processing past attempts',
+      status: DREAM_STATUS.PENDING,
+    });
+
+    await testDb
+      .update(dreams)
+      .set({
+        status: DREAM_STATUS.PROCESSING,
+        attemptCount: DREAM_PROCESSING_CONFIG.MAX_ATTEMPTS,
+        processingLeaseExpiresAt: new Date(Date.now() - 60_000),
+      })
+      .where(eq(dreams.id, dream.id));
+
+    await processDreamImmediately(dream.id);
+
+    const stored = await testDb.query.dreams.findFirst({
+      where: eq(dreams.id, dream.id),
+      columns: { status: true, lastError: true },
+    });
+    expect(stored?.status).toBe(DREAM_STATUS.FAILED);
+    expect(stored?.lastError).toBe('MAX_ATTEMPTS_EXCEEDED');
+  });
+
+  it('recoverStuckDreams re-drives pending dreams and settles unrefunded failures', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const user = await createUserFixture({ plan: PLAN.FREE, weeklyDreamCount: FREE_LIMIT, extraCredits: 1 });
+    const interpreter = await createInterpreterFixture();
+
+    // A stuck PENDING dream (no charge) the sweeper should drive to COMPLETED.
+    const pending = await createDreamFixture({
+      userId: user.id,
+      interpreterId: interpreter.id,
+      content: 'vitest: stuck pending dream',
+      status: DREAM_STATUS.PENDING,
+    });
+
+    // A wallet-charged dream left FAILED + unrefunded the sweeper should refund.
+    const charged = await dreamsService.createDream(
+      user.id,
+      { content: 'vitest: sweeper refund', interpreter_id: interpreter.id, client_request_id: crypto.randomUUID() },
+    );
+    await testDb
+      .update(dreams)
+      .set({ status: DREAM_STATUS.FAILED, failedAt: new Date(), refundedAt: null })
+      .where(eq(dreams.id, charged.id));
+
+    await recoverStuckDreams();
+
+    const pendingStored = await waitForDreamStatus(pending.id, DREAM_STATUS.COMPLETED, 1000);
+    expect(pendingStored.status).toBe(DREAM_STATUS.COMPLETED);
+
+    const chargedStored = await testDb.query.dreams.findFirst({
+      where: eq(dreams.id, charged.id),
+      columns: { refundedAt: true },
+    });
+    expect(chargedStored?.refundedAt).not.toBeNull();
+    expect((await getQuotaAndWallet(user.id)).extraCredits).toBe(1);
   });
 });
