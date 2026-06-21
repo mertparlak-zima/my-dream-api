@@ -26,6 +26,18 @@ export const SUPABASE_JWKS_URL = runtimeEnv.SUPABASE_JWKS_URL;
 export const SUPABASE_JWT_ISSUER = runtimeEnv.SUPABASE_JWT_ISSUER;
 export const DEV_AUTH_ENABLED = runtimeEnv.DEV_AUTH_ENABLED;
 
+export const BETTER_AUTH_SECRET = runtimeEnv.BETTER_AUTH_SECRET;
+export const BETTER_AUTH_URL = runtimeEnv.BETTER_AUTH_URL;
+export const GOOGLE_WEB_CLIENT_ID = runtimeEnv.GOOGLE_WEB_CLIENT_ID;
+export const GOOGLE_IOS_CLIENT_ID = runtimeEnv.GOOGLE_IOS_CLIENT_ID;
+export const GOOGLE_ANDROID_CLIENT_ID = runtimeEnv.GOOGLE_ANDROID_CLIENT_ID;
+export const GOOGLE_WEB_CLIENT_SECRET = runtimeEnv.GOOGLE_WEB_CLIENT_SECRET;
+export const APPLE_SERVICE_ID = runtimeEnv.APPLE_SERVICE_ID;
+export const APPLE_APP_BUNDLE_IDENTIFIER = runtimeEnv.APPLE_APP_BUNDLE_IDENTIFIER;
+export const APPLE_TEAM_ID = runtimeEnv.APPLE_TEAM_ID;
+export const APPLE_KEY_ID = runtimeEnv.APPLE_KEY_ID;
+export const APPLE_PRIVATE_KEY = runtimeEnv.APPLE_PRIVATE_KEY;
+
 export const CORS_CONFIG = {
   ALLOWED_ORIGINS: runtimeEnv.CORS_ALLOWED_ORIGINS,
 } as const;

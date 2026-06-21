@@ -39,6 +39,8 @@ async function invokeProductionHandler(error: Error) {
   process.env.OPENROUTER_API_KEY = 'openrouter-key';
   process.env.CORS_ALLOWED_ORIGINS = 'https://mydream.app';
   process.env.DEV_AUTH_ENABLED = 'false';
+  process.env.BETTER_AUTH_SECRET = 'x'.repeat(32);
+  process.env.BETTER_AUTH_URL = 'https://api.example.com';
 
   try {
     const { errorHandler: productionErrorHandler } = await import('../../src/middlewares/errorHandler');

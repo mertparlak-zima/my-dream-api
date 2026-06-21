@@ -73,6 +73,27 @@ describe('runtime config', () => {
     expect(() => parseRuntimeEnv(process.env)).toThrow(/DATABASE_URL is required in production/);
     expect(() => parseRuntimeEnv(process.env)).toThrow(/SUPABASE_URL is required in production/);
     expect(() => parseRuntimeEnv(process.env)).toThrow(/OPENROUTER_API_KEY is required in production/);
+    expect(() => parseRuntimeEnv(process.env)).toThrow(/BETTER_AUTH_SECRET is required in production/);
+    expect(() => parseRuntimeEnv(process.env)).toThrow(/BETTER_AUTH_URL is required in production/);
+  });
+
+  it('rejects a BETTER_AUTH_SECRET shorter than 32 characters when provided', async () => {
+    const { parseRuntimeEnv } = await loadEnvParser();
+
+    setEnv({ NODE_ENV: 'development', BETTER_AUTH_SECRET: 'too-short' });
+
+    expect(() => parseRuntimeEnv(process.env)).toThrow(/BETTER_AUTH_SECRET/);
+  });
+
+  it('accepts a valid BETTER_AUTH_SECRET and URL in development', async () => {
+    const env = await parseEnv({
+      NODE_ENV: 'development',
+      BETTER_AUTH_SECRET: 'x'.repeat(32),
+      BETTER_AUTH_URL: 'https://api.example.com',
+    });
+
+    expect(env.BETTER_AUTH_SECRET).toBe('x'.repeat(32));
+    expect(env.BETTER_AUTH_URL).toBe('https://api.example.com');
   });
 
   it('rejects production dev auth and wildcard CORS', async () => {
@@ -101,6 +122,8 @@ describe('runtime config', () => {
       CORS_ALLOWED_ORIGINS: 'https://app.mydream.local,https://admin.mydream.local',
       JWT_SECRET: undefined,
       DEV_AUTH_ENABLED: 'false',
+      BETTER_AUTH_SECRET: 'x'.repeat(32),
+      BETTER_AUTH_URL: 'https://api.example.com',
     });
 
     expect(env.SUPABASE_URL).toBe('https://project.supabase.co');

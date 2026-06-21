@@ -131,6 +131,8 @@ describe('rateLimitMiddleware', () => {
       SUPABASE_URL: 'https://example.supabase.co',
       CORS_ALLOWED_ORIGINS: 'https://mydream.zimastack.com',
       DEV_AUTH_ENABLED: 'false',
+      BETTER_AUTH_SECRET: 'x'.repeat(32),
+      BETTER_AUTH_URL: 'https://api.example.com',
     });
 
     const response1 = await app.request('/ping', {
@@ -160,6 +162,8 @@ describe('rateLimitMiddleware', () => {
       SUPABASE_URL: 'https://example.supabase.co',
       CORS_ALLOWED_ORIGINS: 'https://mydream.zimastack.com',
       DEV_AUTH_ENABLED: 'false',
+      BETTER_AUTH_SECRET: 'x'.repeat(32),
+      BETTER_AUTH_URL: 'https://api.example.com',
     });
 
     const response1 = await app.request('/ping', {

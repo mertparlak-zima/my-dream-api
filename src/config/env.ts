@@ -19,6 +19,11 @@ const emptyToUndefined = (value: unknown): unknown => {
 
 const optionalString = z.preprocess(emptyToUndefined, z.string().optional());
 
+const optionalSecret = z.preprocess(
+  emptyToUndefined,
+  z.string().min(32, 'must be at least 32 characters').optional(),
+);
+
 const optionalUrl = z.preprocess(
   emptyToUndefined,
   z.string().url().optional(),
@@ -52,6 +57,17 @@ const rawEnvSchema = z.object({
   REDIS_URL: optionalString,
   JWT_SECRET: optionalString,
   OPENROUTER_API_KEY: optionalString,
+  BETTER_AUTH_SECRET: optionalSecret,
+  BETTER_AUTH_URL: optionalUrl,
+  GOOGLE_WEB_CLIENT_ID: optionalString,
+  GOOGLE_IOS_CLIENT_ID: optionalString,
+  GOOGLE_ANDROID_CLIENT_ID: optionalString,
+  GOOGLE_WEB_CLIENT_SECRET: optionalString,
+  APPLE_SERVICE_ID: optionalString,
+  APPLE_APP_BUNDLE_IDENTIFIER: optionalString,
+  APPLE_TEAM_ID: optionalString,
+  APPLE_KEY_ID: optionalString,
+  APPLE_PRIVATE_KEY: optionalString,
   SUPABASE_URL: optionalUrl.transform((value) => (value ? trimTrailingSlash(value) : undefined)),
   SUPABASE_JWKS_URL: optionalUrl,
   SUPABASE_JWT_ISSUER: optionalUrl,
@@ -91,6 +107,14 @@ const productionEnvSchema = rawEnvSchema.superRefine((env, ctx) => {
 
   if (!env.OPENROUTER_API_KEY) {
     addRequiredIssue('OPENROUTER_API_KEY', 'OPENROUTER_API_KEY is required in production.');
+  }
+
+  if (!env.BETTER_AUTH_SECRET) {
+    addRequiredIssue('BETTER_AUTH_SECRET', 'BETTER_AUTH_SECRET is required in production.');
+  }
+
+  if (!env.BETTER_AUTH_URL) {
+    addRequiredIssue('BETTER_AUTH_URL', 'BETTER_AUTH_URL is required in production.');
   }
 
   if (env.CORS_ALLOWED_ORIGINS.length === 0 || env.CORS_ALLOWED_ORIGINS.includes('*')) {
