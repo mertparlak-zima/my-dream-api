@@ -68,16 +68,20 @@ export async function consumeForDream(
 
   // Quota path: rollover + increment + limit check in one statement. A returned
   // row means a free slot was consumed; no row means the quota is exhausted.
+  // Raw sql params: timestamptz values must be passed as ISO strings (the driver
+  // does not bind a JS Date instance inside a template literal).
+  const windowStartIso = windowStart.toISOString();
+  const nowIso = now.toISOString();
   const quotaResult = await tx.execute(sql`
     INSERT INTO user_usage (user_id, quota_key, window_started_at, used_count, updated_at)
-    VALUES (${userId}, ${DREAM_QUOTA_KEY}, ${windowStart}, 1, ${now})
+    VALUES (${userId}, ${DREAM_QUOTA_KEY}, ${windowStartIso}, 1, ${nowIso})
     ON CONFLICT (user_id, quota_key) DO UPDATE
     SET window_started_at = excluded.window_started_at,
         used_count = CASE
           WHEN user_usage.window_started_at < excluded.window_started_at THEN 1
           ELSE user_usage.used_count + 1
         END,
-        updated_at = ${now}
+        updated_at = ${nowIso}
     WHERE user_usage.window_started_at < excluded.window_started_at
        OR (user_usage.window_started_at = excluded.window_started_at AND user_usage.used_count < ${limit})
     RETURNING used_count

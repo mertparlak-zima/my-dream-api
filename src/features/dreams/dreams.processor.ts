@@ -65,18 +65,21 @@ const refundSelect = {
  * never overwrite a newer attempt's result.
  */
 async function claimDream(dreamId: string, attemptId: string, now: Date): Promise<boolean> {
-  const leaseExpiry = new Date(now.getTime() + LEASE_MS);
+  // Raw sql params: timestamptz values are passed as ISO strings (the driver does
+  // not bind a JS Date instance inside a template literal).
+  const nowIso = now.toISOString();
+  const leaseExpiryIso = new Date(now.getTime() + LEASE_MS).toISOString();
   const rows = await db.execute(sql`
     UPDATE dreams
     SET status = ${DREAM_STATUS.PROCESSING},
         processing_attempt_id = ${attemptId},
-        processing_started_at = ${now},
-        processing_lease_expires_at = ${leaseExpiry},
+        processing_started_at = ${nowIso},
+        processing_lease_expires_at = ${leaseExpiryIso},
         attempt_count = attempt_count + 1,
-        updated_at = ${now}
+        updated_at = ${nowIso}
     WHERE id = ${dreamId}
       AND attempt_count < ${MAX_ATTEMPTS}
-      AND (status = 'PENDING' OR (status = 'PROCESSING' AND processing_lease_expires_at < ${now}))
+      AND (status = 'PENDING' OR (status = 'PROCESSING' AND processing_lease_expires_at < ${nowIso}))
     RETURNING id
   `);
   return rows.length > 0;

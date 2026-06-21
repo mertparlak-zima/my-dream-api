@@ -151,6 +151,25 @@ export async function createUserFixture(input: UserFixtureInput = {}) {
   return { id, headers: authDevHeaders(id) };
 }
 
+/**
+ * Inserts a minimal Better Auth user with NO name and NO domain rows, modelling a
+ * user that Better Auth has just created but whose profile/domain state has not
+ * been provisioned yet (used to exercise the profile-bootstrap first-fill path).
+ */
+export async function seedBareUser(): Promise<string> {
+  const now = new Date();
+  const id = crypto.randomUUID();
+  await testDb.insert(users).values({
+    id,
+    name: 'Bare User',
+    email: `${TEST_EMAIL_PREFIX}${testToken()}@mydream.local`,
+    emailVerified: true,
+    updatedAt: now,
+  });
+  markCreated('user', id);
+  return id;
+}
+
 export async function createModelFixture(input: ModelFixtureInput = {}) {
   const now = new Date();
   const id = input.id ?? crypto.randomUUID();
