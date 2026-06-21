@@ -29,9 +29,9 @@ const SESSION_FRESH_AGE_SECONDS = 60 * 10; // 10-minute freshness gate (e.g. DEL
 // Mobile dev origins are only trusted outside production; prod keeps the real
 // app scheme plus Apple's host (required for the Sign in with Apple flow).
 const trustedOrigins = [
-  'myapp://',
+  'mydream://',
   'https://appleid.apple.com',
-  ...(IS_PRODUCTION ? [] : ['myapp-dev://', 'exp://**']),
+  ...(IS_PRODUCTION ? [] : ['mydream-dev://', 'exp://**']),
 ];
 
 // Each provider is registered only when its full credential set is present, so
