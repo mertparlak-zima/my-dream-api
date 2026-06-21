@@ -4,10 +4,6 @@ const NODE_ENV_VALUES = ['development', 'test', 'production'] as const;
 const LOG_LEVEL_VALUES = ['error', 'warn', 'info', 'http', 'debug'] as const;
 const LOG_FORMAT_VALUES = ['json', 'pretty'] as const;
 
-function trimTrailingSlash(value: string): string {
-  return value.replace(/\/+$/, '');
-}
-
 const emptyToUndefined = (value: unknown): unknown => {
   if (typeof value !== 'string') {
     return value;
@@ -55,7 +51,6 @@ const rawEnvSchema = z.object({
   PORT: optionalPositiveInteger,
   DATABASE_URL: optionalString,
   REDIS_URL: optionalString,
-  JWT_SECRET: optionalString,
   OPENROUTER_API_KEY: optionalString,
   BETTER_AUTH_SECRET: optionalSecret,
   BETTER_AUTH_URL: optionalUrl,
@@ -68,9 +63,6 @@ const rawEnvSchema = z.object({
   APPLE_TEAM_ID: optionalString,
   APPLE_KEY_ID: optionalString,
   APPLE_PRIVATE_KEY: optionalString,
-  SUPABASE_URL: optionalUrl.transform((value) => (value ? trimTrailingSlash(value) : undefined)),
-  SUPABASE_JWKS_URL: optionalUrl,
-  SUPABASE_JWT_ISSUER: optionalUrl,
   CORS_ALLOWED_ORIGINS: csvList,
   SENTRY_DSN: optionalUrl,
   SENTRY_ENVIRONMENT: optionalString,
@@ -101,10 +93,6 @@ const productionEnvSchema = rawEnvSchema.superRefine((env, ctx) => {
     addRequiredIssue('DATABASE_URL', 'DATABASE_URL is required in production.');
   }
 
-  if (!env.SUPABASE_URL) {
-    addRequiredIssue('SUPABASE_URL', 'SUPABASE_URL is required in production.');
-  }
-
   if (!env.OPENROUTER_API_KEY) {
     addRequiredIssue('OPENROUTER_API_KEY', 'OPENROUTER_API_KEY is required in production.');
   }
@@ -117,15 +105,21 @@ const productionEnvSchema = rawEnvSchema.superRefine((env, ctx) => {
     addRequiredIssue('BETTER_AUTH_URL', 'BETTER_AUTH_URL is required in production.');
   }
 
+  // Social login is the only production auth path, so both providers must be fully
+  // configured (the runtime registers a provider only when its full set is present).
+  if (!env.GOOGLE_WEB_CLIENT_ID || !env.GOOGLE_IOS_CLIENT_ID || !env.GOOGLE_ANDROID_CLIENT_ID || !env.GOOGLE_WEB_CLIENT_SECRET) {
+    addRequiredIssue('GOOGLE_WEB_CLIENT_ID', 'Google client ids and secret are required in production.');
+  }
+
+  if (!env.APPLE_SERVICE_ID || !env.APPLE_APP_BUNDLE_IDENTIFIER || !env.APPLE_TEAM_ID || !env.APPLE_KEY_ID || !env.APPLE_PRIVATE_KEY) {
+    addRequiredIssue('APPLE_SERVICE_ID', 'Apple Service ID, bundle id, team id, key id and private key are required in production.');
+  }
+
   if (env.CORS_ALLOWED_ORIGINS.length === 0 || env.CORS_ALLOWED_ORIGINS.includes('*')) {
     addRequiredIssue(
       'CORS_ALLOWED_ORIGINS',
       'CORS_ALLOWED_ORIGINS must list explicit origins in production.',
     );
-  }
-
-  if (!env.JWT_SECRET && !env.SUPABASE_JWKS_URL && !env.SUPABASE_URL) {
-    addRequiredIssue('JWT_SECRET', 'JWT_SECRET or Supabase JWKS config is required in production.');
   }
 
   if (env.DEV_AUTH_ENABLED) {
@@ -135,8 +129,6 @@ const productionEnvSchema = rawEnvSchema.superRefine((env, ctx) => {
 
 export type RuntimeEnv = z.infer<typeof productionEnvSchema> & {
   PORT: number;
-  SUPABASE_JWKS_URL: string | undefined;
-  SUPABASE_JWT_ISSUER: string | undefined;
   SENTRY_ENVIRONMENT: string;
   SENTRY_TRACES_SAMPLE_RATE: number;
   DEV_AUTH_ENABLED: boolean;
@@ -145,14 +137,10 @@ export type RuntimeEnv = z.infer<typeof productionEnvSchema> & {
   LOG_ENABLED: boolean;
 };
 
-function deriveSupabaseAuthEnv(env: z.infer<typeof productionEnvSchema>): RuntimeEnv {
+function deriveRuntimeEnv(env: z.infer<typeof productionEnvSchema>): RuntimeEnv {
   return {
     ...env,
     PORT: env.PORT ?? 3000,
-    SUPABASE_JWKS_URL: env.SUPABASE_JWKS_URL
-      ?? (env.SUPABASE_URL ? `${env.SUPABASE_URL}/auth/v1/.well-known/jwks.json` : undefined),
-    SUPABASE_JWT_ISSUER: env.SUPABASE_JWT_ISSUER
-      ?? (env.SUPABASE_URL ? `${env.SUPABASE_URL}/auth/v1` : undefined),
     SENTRY_ENVIRONMENT: env.SENTRY_ENVIRONMENT ?? env.NODE_ENV,
     SENTRY_TRACES_SAMPLE_RATE: env.SENTRY_TRACES_SAMPLE_RATE ?? (env.NODE_ENV === 'production' ? 0.1 : 1),
     DEV_AUTH_ENABLED: (env.NODE_ENV === 'development' || env.NODE_ENV === 'test') && env.DEV_AUTH_ENABLED,
@@ -178,5 +166,5 @@ export function parseRuntimeEnv(source: NodeJS.ProcessEnv = process.env): Runtim
     throw formatEnvError(parsed.error);
   }
 
-  return deriveSupabaseAuthEnv(parsed.data);
+  return deriveRuntimeEnv(parsed.data);
 }

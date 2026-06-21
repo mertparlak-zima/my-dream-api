@@ -1,6 +1,7 @@
 import { OpenAPIHono } from '@hono/zod-openapi';
 import { Scalar } from '@scalar/hono-api-reference';
 import { cors } from 'hono/cors';
+import { auth } from './auth/auth';
 import { CORS_CONFIG } from './config';
 import { authRoutes } from './features/auth/auth.controller';
 import { creditsRoutes } from './features/credits/credits.controller';
@@ -76,6 +77,10 @@ app.get('/docs', Scalar((c) => ({
   pageTitle: 'My Dream API Reference',
   url: new URL('/openapi.json', c.req.url).toString(),
 })));
+
+// Better Auth owns sign-in/up, session and OAuth callbacks. Mounted after the
+// global CORS + rate-limit middleware so /api/auth/* is covered by both.
+app.on(['GET', 'POST'], '/api/auth/*', (c) => auth.handler(c.req.raw));
 
 app.route('/auth', authRoutes);
 app.route('/users', usersRoutes);

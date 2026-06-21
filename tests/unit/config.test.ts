@@ -71,10 +71,11 @@ describe('runtime config', () => {
     });
 
     expect(() => parseRuntimeEnv(process.env)).toThrow(/DATABASE_URL is required in production/);
-    expect(() => parseRuntimeEnv(process.env)).toThrow(/SUPABASE_URL is required in production/);
     expect(() => parseRuntimeEnv(process.env)).toThrow(/OPENROUTER_API_KEY is required in production/);
     expect(() => parseRuntimeEnv(process.env)).toThrow(/BETTER_AUTH_SECRET is required in production/);
     expect(() => parseRuntimeEnv(process.env)).toThrow(/BETTER_AUTH_URL is required in production/);
+    expect(() => parseRuntimeEnv(process.env)).toThrow(/Google client ids and secret are required/);
+    expect(() => parseRuntimeEnv(process.env)).toThrow(/Apple Service ID/);
   });
 
   it('rejects a BETTER_AUTH_SECRET shorter than 32 characters when provided', async () => {
@@ -113,21 +114,26 @@ describe('runtime config', () => {
     expect(() => parseRuntimeEnv(process.env)).toThrow(/CORS_ALLOWED_ORIGINS must list explicit origins/);
   });
 
-  it('accepts explicit production env values and derives Supabase JWKS config', async () => {
+  it('accepts explicit production env values with both providers configured', async () => {
     const env = await parseEnv({
       NODE_ENV: 'production',
       DATABASE_URL: 'postgres://mydream:mydream@localhost:5433/mydream',
-      SUPABASE_URL: 'https://project.supabase.co/',
       OPENROUTER_API_KEY: 'openrouter-key',
       CORS_ALLOWED_ORIGINS: 'https://app.mydream.local,https://admin.mydream.local',
-      JWT_SECRET: undefined,
       DEV_AUTH_ENABLED: 'false',
       BETTER_AUTH_SECRET: 'x'.repeat(32),
       BETTER_AUTH_URL: 'https://api.example.com',
+      GOOGLE_WEB_CLIENT_ID: 'g-web',
+      GOOGLE_IOS_CLIENT_ID: 'g-ios',
+      GOOGLE_ANDROID_CLIENT_ID: 'g-and',
+      GOOGLE_WEB_CLIENT_SECRET: 'g-sec',
+      APPLE_SERVICE_ID: 'a-svc',
+      APPLE_APP_BUNDLE_IDENTIFIER: 'a-bundle',
+      APPLE_TEAM_ID: 'a-team',
+      APPLE_KEY_ID: 'a-key',
+      APPLE_PRIVATE_KEY: 'a-pk',
     });
 
-    expect(env.SUPABASE_URL).toBe('https://project.supabase.co');
-    expect(env.SUPABASE_JWKS_URL).toBe('https://project.supabase.co/auth/v1/.well-known/jwks.json');
     expect(env.DEV_AUTH_ENABLED).toBe(false);
     expect(env.SENTRY_ENVIRONMENT).toBe('production');
     expect(env.SENTRY_TRACES_SAMPLE_RATE).toBe(0.1);

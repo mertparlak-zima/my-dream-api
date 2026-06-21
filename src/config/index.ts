@@ -19,11 +19,7 @@ export const IS_PRODUCTION = NODE_ENV === 'production';
 
 export const DATABASE_URL = runtimeEnv.DATABASE_URL;
 export const REDIS_URL = runtimeEnv.REDIS_URL;
-export const JWT_SECRET = runtimeEnv.JWT_SECRET;
 export const OPENROUTER_API_KEY = runtimeEnv.OPENROUTER_API_KEY;
-export const SUPABASE_URL = runtimeEnv.SUPABASE_URL;
-export const SUPABASE_JWKS_URL = runtimeEnv.SUPABASE_JWKS_URL;
-export const SUPABASE_JWT_ISSUER = runtimeEnv.SUPABASE_JWT_ISSUER;
 export const DEV_AUTH_ENABLED = runtimeEnv.DEV_AUTH_ENABLED;
 
 export const BETTER_AUTH_SECRET = runtimeEnv.BETTER_AUTH_SECRET;

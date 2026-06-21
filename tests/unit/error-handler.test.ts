@@ -35,12 +35,20 @@ async function invokeProductionHandler(error: Error) {
 
   vi.resetModules();
   process.env.NODE_ENV = 'production';
-  process.env.SUPABASE_URL = 'https://project.supabase.co';
   process.env.OPENROUTER_API_KEY = 'openrouter-key';
   process.env.CORS_ALLOWED_ORIGINS = 'https://mydream.app';
   process.env.DEV_AUTH_ENABLED = 'false';
   process.env.BETTER_AUTH_SECRET = 'x'.repeat(32);
   process.env.BETTER_AUTH_URL = 'https://api.example.com';
+  process.env.GOOGLE_WEB_CLIENT_ID = 'g-web';
+  process.env.GOOGLE_IOS_CLIENT_ID = 'g-ios';
+  process.env.GOOGLE_ANDROID_CLIENT_ID = 'g-and';
+  process.env.GOOGLE_WEB_CLIENT_SECRET = 'g-sec';
+  process.env.APPLE_SERVICE_ID = 'a-svc';
+  process.env.APPLE_APP_BUNDLE_IDENTIFIER = 'a-bundle';
+  process.env.APPLE_TEAM_ID = 'a-team';
+  process.env.APPLE_KEY_ID = 'a-key';
+  process.env.APPLE_PRIVATE_KEY = 'a-pk';
 
   try {
     const { errorHandler: productionErrorHandler } = await import('../../src/middlewares/errorHandler');
