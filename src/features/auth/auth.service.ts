@@ -4,6 +4,8 @@ import { db } from '../../db';
 import { users } from '../../db/schema/auth';
 import { logger } from '../../utils/logger';
 import { addSentryBreadcrumb } from '../../utils/sentry';
+import { AUDIT_SOURCE } from '../../constants/domain';
+import { writeAudit } from '../audit/audit.service';
 import { ensureUserDomainState } from '../credits/credit-engine';
 import { usersService, type UserResponse } from '../users/users.service';
 import type { BootstrapProfileInput } from './auth.schemas';
@@ -27,6 +29,11 @@ export const authService = {
           updatedAt: new Date(),
         })
         .where(and(eq(users.id, userId), isNull(users.firstName), isNull(users.lastName)));
+
+      await writeAudit(
+        { event: 'PROFILE_BOOTSTRAP', source: AUDIT_SOURCE.api, actorUserId: userId, targetUserId: userId },
+        tx,
+      );
     });
 
     logger.info('profile bootstrap', { op: 'auth.bootstrap', userId });

@@ -197,6 +197,14 @@ export async function cleanupTestData(): Promise<void> {
   }
 
   if (userIds.length > 0) {
+    // Audit FKs are SET NULL on user delete; remove the test users' rows explicitly
+    // so the append-only trail does not accumulate orphaned rows across runs.
+    await testDb
+      .delete(schema.auditLogs)
+      .where(or(
+        inArray(schema.auditLogs.actorUserId, userIds),
+        inArray(schema.auditLogs.targetUserId, userIds),
+      ));
     await testDb.delete(schema.users).where(inArray(schema.users.id, userIds));
   }
 

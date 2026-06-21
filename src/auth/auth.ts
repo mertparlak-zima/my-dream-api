@@ -18,6 +18,8 @@ import {
   GOOGLE_WEB_CLIENT_SECRET,
   IS_PRODUCTION,
 } from '../config';
+import { AUDIT_SOURCE } from '../constants/domain';
+import { writeAudit } from '../features/audit/audit.service';
 import { generateAppleClientSecret } from './apple-client-secret';
 
 const SESSION_EXPIRES_IN_SECONDS = 60 * 60 * 24 * 30; // 30-day rolling inactivity window
@@ -87,6 +89,21 @@ export const auth = betterAuth({
     additionalFields: {
       firstName: { type: 'string', required: false, input: false },
       lastName: { type: 'string', required: false, input: false },
+    },
+  },
+  databaseHooks: {
+    session: {
+      create: {
+        after: async (session: { userId: string }): Promise<void> => {
+          // Lightweight sign-in trail; never logs tokens (audit metadata whitelist).
+          await writeAudit({
+            event: 'SIGN_IN',
+            source: AUDIT_SOURCE.api,
+            actorUserId: session.userId,
+            targetUserId: session.userId,
+          });
+        },
+      },
     },
   },
   emailAndPassword: { enabled: !IS_PRODUCTION }, // dev/test only
