@@ -1,5 +1,9 @@
 export * from './enums';
-export * from '../features/users/users.schema';
+// Better Auth owns the identity tables (users/accounts/sessions/verifications).
+export * from './schema/auth';
+export * from './schema/domain';
+export * from './schema/history';
+export * from './schema/audit';
 export * from '../features/users/user_profiles.schema';
 export * from '../features/users/user_preferences.schema';
 export * from '../features/ai_models/models.schema';

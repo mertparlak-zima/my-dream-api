@@ -1,2 +1,0 @@
-ALTER TABLE "dreams" ADD COLUMN "is_bookmarked" boolean DEFAULT false NOT NULL;--> statement-breakpoint
-CREATE INDEX "dreams_user_bookmarked_created_at_idx" ON "dreams" USING btree ("user_id","is_bookmarked","created_at");
