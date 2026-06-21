@@ -1,63 +1,37 @@
+import { and, eq, isNull } from 'drizzle-orm';
+
 import { db } from '../../db';
-import { users } from '../users/users.schema';
-import { getNextWeeklyResetDate } from '../../utils/date';
-import { NotFoundError } from '../../errors/NotFoundError';
-import { countUserBookmarks, serializeUser, type UserResponse } from '../users/users.service';
-import { logger, serializeError } from '../../utils/logger';
+import { users } from '../../db/schema/auth';
+import { logger } from '../../utils/logger';
 import { addSentryBreadcrumb } from '../../utils/sentry';
-import type { SyncUserInput } from './auth.schemas';
+import { ensureUserDomainState } from '../credits/credit-engine';
+import { usersService, type UserResponse } from '../users/users.service';
+import type { BootstrapProfileInput } from './auth.schemas';
 
 export const authService = {
-  async syncUser(userId: string, input: SyncUserInput): Promise<UserResponse> {
-    const now = new Date();
-    const updateValues = {
-      email: input.email,
-      authProvider: input.auth_provider,
-      providerId: input.provider_id,
-      ...(input.first_name ? { firstName: input.first_name } : {}),
-      ...(input.last_name ? { lastName: input.last_name } : {}),
-      updatedAt: now,
-    };
+  /**
+   * Persists the first/last name captured at first social authorization. Identity
+   * and account creation are owned by Better Auth; this only fills the profile
+   * name and only while it is still empty (a logged-in user cannot keep
+   * overwriting it). Also ensures the user's domain rows exist.
+   */
+  async bootstrapProfile(userId: string, input: BootstrapProfileInput): Promise<UserResponse> {
+    await db.transaction(async (tx) => {
+      await ensureUserDomainState(tx, userId);
 
-    try {
-      const [syncedUser] = await db
-        .insert(users)
-        .values({
-          id: userId,
-          email: input.email,
-          authProvider: input.auth_provider,
-          providerId: input.provider_id,
+      await tx
+        .update(users)
+        .set({
           firstName: input.first_name ?? null,
           lastName: input.last_name ?? null,
-          limitResetDate: getNextWeeklyResetDate(now),
-          updatedAt: now,
+          updatedAt: new Date(),
         })
-        .onConflictDoUpdate({
-          target: users.id,
-          set: updateValues,
-        })
-        .returning();
+        .where(and(eq(users.id, userId), isNull(users.firstName), isNull(users.lastName)));
+    });
 
-      if (!syncedUser) {
-        throw new NotFoundError('Kullanici senkronize edilemedi.');
-      }
+    logger.info('profile bootstrap', { op: 'auth.bootstrap', userId });
+    addSentryBreadcrumb('auth.bootstrap', 'Profile name bootstrapped', { userId });
 
-      logger.info('auth sync succeeded', { op: 'auth.sync', userId, authProvider: input.auth_provider });
-      addSentryBreadcrumb('auth.sync', 'Supabase user synced', {
-        authProvider: input.auth_provider,
-        userId,
-      });
-
-      return serializeUser(syncedUser, await countUserBookmarks(syncedUser.id));
-    } catch (error) {
-      logger.error('auth sync failed', { op: 'auth.sync', userId, err: serializeError(error) });
-      addSentryBreadcrumb('auth.sync', 'Supabase user sync failed', {
-        authProvider: input.auth_provider,
-        errorName: error instanceof Error ? error.name : 'UnknownError',
-        userId,
-      }, 'error');
-
-      throw error;
-    }
+    return usersService.getCurrentUser(userId);
   },
 };

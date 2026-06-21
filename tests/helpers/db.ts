@@ -99,12 +99,7 @@ async function findTestUserIds(): Promise<string[]> {
   const rows = await testDb
     .select({ id: schema.users.id })
     .from(schema.users)
-    .where(
-      or(
-        like(schema.users.email, `${TEST_EMAIL_PREFIX}%`),
-        like(schema.users.providerId, `${TEST_TEXT_PREFIX}%`),
-      ),
-    );
+    .where(like(schema.users.email, `${TEST_EMAIL_PREFIX}%`));
 
   return mergeIds(createdIds.user, rows.map((row) => row.id));
 }
@@ -170,6 +165,13 @@ export async function cleanupTestData(): Promise<void> {
   const interpreterIds = await findTestInterpreterIds(modelIds);
   const dreamIds = await findTestDreamIds(userIds, interpreterIds);
 
+  // Dreams must go first: dreams.charged_transaction_id / refund_transaction_id
+  // reference credit_transactions with ON DELETE RESTRICT, so the ledger rows
+  // cannot be deleted while a referencing dream still exists.
+  if (dreamIds.length > 0) {
+    await testDb.delete(schema.dreams).where(inArray(schema.dreams.id, dreamIds));
+  }
+
   const creditDeleteConditions: SQL<unknown>[] = [];
 
   if (userIds.length > 0) {
@@ -184,10 +186,6 @@ export async function cleanupTestData(): Promise<void> {
     await testDb
       .delete(schema.creditTransactions)
       .where(or(...creditDeleteConditions));
-  }
-
-  if (dreamIds.length > 0) {
-    await testDb.delete(schema.dreams).where(inArray(schema.dreams.id, dreamIds));
   }
 
   if (interpreterIds.length > 0) {

@@ -1,12 +1,13 @@
 import { z } from 'zod';
-import { AUTH_PROVIDERS } from '../../constants/domain';
 
-export const syncUserSchema = z.object({
-  email: z.email(),
-  auth_provider: z.enum(AUTH_PROVIDERS),
-  provider_id: z.string().min(1),
+/**
+ * Apple only returns the user's name on the very first authorization, so the app
+ * calls this once when the name fields are still empty. Identity (email,
+ * provider, account) is owned by Better Auth; only profile name is accepted here.
+ */
+export const bootstrapProfileSchema = z.object({
   first_name: z.string().min(1).max(120).optional(),
   last_name: z.string().min(1).max(120).optional(),
 });
 
-export type SyncUserInput = z.infer<typeof syncUserSchema>;
+export type BootstrapProfileInput = z.infer<typeof bootstrapProfileSchema>;

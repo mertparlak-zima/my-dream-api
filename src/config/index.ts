@@ -76,6 +76,10 @@ export const DREAM_PROCESSING_CONFIG = {
   OPENROUTER_CHAT_COMPLETIONS_URL: 'https://openrouter.ai/api/v1/chat/completions',
   OPENROUTER_TEMPERATURE: 0.7,
   OPENROUTER_MAX_TOKENS: 1_200,
+  // Recovery: a claimed dream holds a processing lease; once it expires another
+  // run may reclaim it. A dream that exhausts MAX_ATTEMPTS is terminalized FAILED.
+  MAX_ATTEMPTS: 3,
+  LEASE_MS: 5 * 60 * 1000,
 } as const;
 
 export const PLAN_LIMITS: Record<Plan, number> = {

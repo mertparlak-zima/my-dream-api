@@ -1,21 +1,20 @@
-import { and, desc, eq, lte, lt, or, sql } from 'drizzle-orm';
-import { PLAN_LIMITS } from '../../config';
+import { createHash } from 'node:crypto';
+
+import { and, desc, eq, lt, or } from 'drizzle-orm';
 import {
-  CREDIT_TRANSACTION_TYPE,
   DREAM_STATUS,
   PLAN,
   type DreamStatus,
 } from '../../constants/domain';
 import { db } from '../../db';
-import { CreditError } from '../../errors/CreditError';
+import { ConflictError } from '../../errors/ConflictError';
 import { ForbiddenError } from '../../errors/ForbiddenError';
 import { NotFoundError } from '../../errors/NotFoundError';
 import { ValidationError } from '../../errors/ValidationError';
-import { getNextWeeklyResetDate } from '../../utils/date';
 import { logger } from '../../utils/logger';
-import { creditTransactions } from '../credits/credits.schema';
+import { consumeForDream, ensureUserDomainState } from '../credits/credit-engine';
+import { userEntitlements } from '../../db/schema/domain';
 import { interpreters } from '../interpreters/interpreters.schema';
-import { users } from '../users/users.schema';
 import { scheduleDreamProcessing } from './dreams.processor';
 import { dreams } from './dreams.schema';
 import type {
@@ -108,7 +107,73 @@ type DreamCursor = {
   id: string;
 };
 
-type SpendTransactionType = typeof CREDIT_TRANSACTION_TYPE.USED_WEEKLY | typeof CREDIT_TRANSACTION_TYPE.USED_EXTRA;
+/**
+ * Hashes only the immutable client payload (never mutable server state like
+ * price or quota), so a network retry with the same client_request_id matches
+ * and returns the original dream instead of being rejected as a key reuse.
+ */
+function computeRequestHash(content: string, interpreterId: string): string {
+  return createHash('sha256').update(JSON.stringify({ content, interpreterId })).digest('hex');
+}
+
+type DreamRowFields = {
+  id: string;
+  content: string;
+  status: DreamStatus;
+  interpretation: string | null;
+  userRating: number | null;
+  userFeedbackText: string | null;
+  isBookmarked: boolean;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
+type InterpreterFields = {
+  id: string;
+  name: string;
+  description: string;
+  imageUrl: string | null;
+  isPremium: boolean;
+  sortOrder: number;
+  accentColor: string;
+};
+
+function dreamReturningFields(): {
+  id: typeof dreams.id;
+  content: typeof dreams.content;
+  status: typeof dreams.status;
+  interpretation: typeof dreams.interpretation;
+  userRating: typeof dreams.userRating;
+  userFeedbackText: typeof dreams.userFeedbackText;
+  isBookmarked: typeof dreams.isBookmarked;
+  createdAt: typeof dreams.createdAt;
+  updatedAt: typeof dreams.updatedAt;
+} {
+  return {
+    id: dreams.id,
+    content: dreams.content,
+    status: dreams.status,
+    interpretation: dreams.interpretation,
+    userRating: dreams.userRating,
+    userFeedbackText: dreams.userFeedbackText,
+    isBookmarked: dreams.isBookmarked,
+    createdAt: dreams.createdAt,
+    updatedAt: dreams.updatedAt,
+  };
+}
+
+function buildDetailRow(row: DreamRowFields, interpreter: InterpreterFields): DreamDetailRow {
+  return {
+    ...row,
+    interpreterId: interpreter.id,
+    interpreterName: interpreter.name,
+    interpreterDescription: interpreter.description,
+    interpreterImageUrl: interpreter.imageUrl,
+    interpreterIsPremium: interpreter.isPremium,
+    interpreterSortOrder: interpreter.sortOrder,
+    interpreterAccentColor: interpreter.accentColor,
+  };
+}
 
 function serializeDream(row: DreamDetailRow): DreamResponse {
   return {
@@ -260,21 +325,17 @@ async function findOwnedDream(userId: string, dreamId: string): Promise<DreamDet
 
 export const dreamsService = {
   async createDream(userId: string, input: CreateDreamInput): Promise<DreamResponse> {
-    const dream = await db.transaction(async (tx) => {
-      const [user] = await tx
-        .select({
-          plan: users.plan,
-          weeklyDreamCount: users.weeklyDreamCount,
-          extraCredits: users.extraCredits,
-          limitResetDate: users.limitResetDate,
-        })
-        .from(users)
-        .where(eq(users.id, userId))
-        .limit(1);
+    const requestHash = computeRequestHash(input.content, input.interpreter_id);
 
-      if (!user) {
-        throw new NotFoundError('Kullanici bulunamadi.');
-      }
+    const result = await db.transaction(async (tx) => {
+      await ensureUserDomainState(tx, userId);
+
+      const [entitlement] = await tx
+        .select({ plan: userEntitlements.plan })
+        .from(userEntitlements)
+        .where(eq(userEntitlements.userId, userId))
+        .limit(1);
+      const plan = entitlement?.plan ?? PLAN.FREE;
 
       const [interpreter] = await tx
         .select({
@@ -294,104 +355,70 @@ export const dreamsService = {
         throw new NotFoundError('Yorumcu bulunamadi.');
       }
 
-      if (interpreter.isPremium && user.plan === PLAN.FREE) {
+      if (interpreter.isPremium && plan === PLAN.FREE) {
         throw new ForbiddenError('Premium yorumcu icin aktif abonelik gerekir.');
       }
 
       const now = new Date();
-      await tx
-        .update(users)
-        .set({
-          weeklyDreamCount: 0,
-          limitResetDate: getNextWeeklyResetDate(now),
-          updatedAt: now,
-        })
-        .where(and(eq(users.id, userId), lte(users.limitResetDate, now)));
 
-      const weeklyLimit = PLAN_LIMITS[user.plan];
-      let spendType: SpendTransactionType;
-
-      const [weeklySpend] = await tx
-        .update(users)
-        .set({
-          weeklyDreamCount: sql<number>`${users.weeklyDreamCount} + 1`,
-          updatedAt: now,
-        })
-        .where(and(eq(users.id, userId), sql`${users.weeklyDreamCount} < ${weeklyLimit}`))
-        .returning({ id: users.id });
-
-      if (weeklySpend) {
-        spendType = CREDIT_TRANSACTION_TYPE.USED_WEEKLY;
-      } else {
-        const [extraSpend] = await tx
-          .update(users)
-          .set({
-            extraCredits: sql<number>`${users.extraCredits} - 1`,
-            updatedAt: now,
-          })
-          .where(and(eq(users.id, userId), sql`${users.extraCredits} > 0`))
-          .returning({ id: users.id });
-
-        if (!extraSpend) {
-          logger.warn('credit spend failed: insufficient', { op: 'credit.spend', userId });
-          throw new CreditError();
-        }
-
-        spendType = CREDIT_TRANSACTION_TYPE.USED_EXTRA;
-      }
-
-      const [createdDream] = await tx
+      // Idempotent insert: a retry with the same client_request_id does not insert.
+      const [created] = await tx
         .insert(dreams)
         .values({
           userId,
           interpreterId: interpreter.id,
           content: input.content,
           status: DREAM_STATUS.PENDING,
+          clientRequestId: input.client_request_id,
+          requestHash,
+          queuedAt: now,
         })
-        .returning({
-          id: dreams.id,
-          content: dreams.content,
-          status: dreams.status,
-          interpretation: dreams.interpretation,
-          userRating: dreams.userRating,
-          userFeedbackText: dreams.userFeedbackText,
-          isBookmarked: dreams.isBookmarked,
-          createdAt: dreams.createdAt,
-          updatedAt: dreams.updatedAt,
-          interpreterId: dreams.interpreterId,
-        });
+        .onConflictDoNothing({ target: [dreams.userId, dreams.clientRequestId] })
+        .returning(dreamReturningFields());
 
-      await tx.insert(creditTransactions).values({
-        userId,
-        transactionType: spendType,
-        amount: 1,
-        relatedDreamId: createdDream.id,
-      });
+      if (!created) {
+        // Same key already exists: replay if the payload matches, else reject.
+        const [existing] = await tx
+          .select({ ...dreamReturningFields(), requestHash: dreams.requestHash })
+          .from(dreams)
+          .where(and(eq(dreams.userId, userId), eq(dreams.clientRequestId, input.client_request_id)))
+          .limit(1);
 
-      return {
-        id: createdDream.id,
-        content: createdDream.content,
-        status: createdDream.status,
-        interpretation: createdDream.interpretation,
-        userRating: createdDream.userRating,
-        userFeedbackText: createdDream.userFeedbackText,
-        isBookmarked: createdDream.isBookmarked,
-        createdAt: createdDream.createdAt,
-        updatedAt: createdDream.updatedAt,
-        interpreterId: interpreter.id,
-        interpreterName: interpreter.name,
-        interpreterDescription: interpreter.description,
-        interpreterImageUrl: interpreter.imageUrl,
-        interpreterIsPremium: interpreter.isPremium,
-        interpreterSortOrder: interpreter.sortOrder,
-        interpreterAccentColor: interpreter.accentColor,
-      };
+        if (!existing) {
+          throw new ConflictError('Istek islenemedi, lutfen tekrar deneyin.');
+        }
+
+        if (existing.requestHash !== requestHash) {
+          throw new ConflictError('Bu istek anahtari farkli bir icerikle kullanilmis.', 'IDEMPOTENCY_KEY_REUSED');
+        }
+
+        return { row: buildDetailRow(existing, interpreter), created: false };
+      }
+
+      // Charge the dream (quota first, then wallet) and persist the billing trail.
+      const charge = await consumeForDream(tx, userId, plan, created.id, now);
+      await tx
+        .update(dreams)
+        .set({
+          quotaSource: charge.quotaSource,
+          quotaKey: charge.quotaKey,
+          quotaWindowStartedAt: charge.quotaWindowStartedAt,
+          quotaUnitsConsumed: charge.quotaUnitsConsumed,
+          usedCoins: charge.usedCoins,
+          usedCost: charge.usedCost,
+          chargedTransactionId: charge.chargedTransactionId,
+        })
+        .where(eq(dreams.id, created.id));
+
+      return { row: buildDetailRow(created, interpreter), created: true };
     });
 
-    scheduleDreamProcessing(dream.id);
-    logger.info('dream created', { op: 'dream.create', userId, dreamId: dream.id });
+    if (result.created) {
+      scheduleDreamProcessing(result.row.id);
+      logger.info('dream created', { op: 'dream.create', userId, dreamId: result.row.id });
+    }
 
-    return serializeDream(dream);
+    return serializeDream(result.row);
   },
 
   async getDreamById(userId: string, dreamId: string): Promise<DreamResponse> {

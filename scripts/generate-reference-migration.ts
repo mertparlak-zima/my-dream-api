@@ -62,8 +62,8 @@ statements.push(
 // 2) Interpreters + enrichment.
 for (const i of REFERENCE_INTERPRETERS) {
   statements.push(
-    `INSERT INTO "interpreters" ("id", "name", "description", "system_prompt", "image_url", "is_premium", "model_id", "is_active", "sort_order", "rating", "reviews", "styles", "story", "samples")\n` +
-      `VALUES (${q(i.id)}, ${q(i.name)}, ${q(i.description)}, ${q(i.systemPrompt)}, ${q(i.imageUrl)}, ${i.isPremium}, ${q(DEFAULT_MODEL_ID)}, true, ${i.sortOrder}, ${q(i.rating)}, ${i.reviews}, ${textArray(i.styles)}, ${q(i.story)}, ${jsonb(i.samples)})\n` +
+    `INSERT INTO "interpreters" ("id", "name", "description", "system_prompt", "image_url", "is_premium", "model_id", "is_active", "sort_order", "tag", "accent_color", "rating", "reviews", "styles", "story", "samples")\n` +
+      `VALUES (${q(i.id)}, ${q(i.name)}, ${q(i.description)}, ${q(i.systemPrompt)}, ${q(i.imageUrl)}, ${i.isPremium}, ${q(DEFAULT_MODEL_ID)}, true, ${i.sortOrder}, ${q(i.tag)}, ${q(i.accentColor)}, ${q(i.rating)}, ${i.reviews}, ${textArray(i.styles)}, ${q(i.story)}, ${jsonb(i.samples)})\n` +
       `ON CONFLICT ("id") DO NOTHING;`,
   );
 }
