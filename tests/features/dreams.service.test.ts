@@ -700,6 +700,29 @@ describe('dreamsService credit behavior', () => {
     expect(await getUserDreams(user.id)).toHaveLength(1);
   });
 
+  it('looks a dream up by its client_request_id for the owning user only', async () => {
+    const user = await createUserFixture({ plan: PLAN.FREE, extraCredits: 0 });
+    const otherUser = await createUserFixture();
+    const interpreter = await createInterpreterFixture();
+    const clientRequestId = crypto.randomUUID();
+
+    const created = await dreamsService.createDream(user.id, {
+      content: 'vitest: lookup by client request id',
+      interpreter_id: interpreter.id,
+      client_request_id: clientRequestId,
+    });
+
+    const found = await dreamsService.getDreamByClientRequestId(user.id, clientRequestId);
+    expect(found.id).toBe(created.id);
+
+    await expect(
+      dreamsService.getDreamByClientRequestId(otherUser.id, clientRequestId),
+    ).rejects.toBeInstanceOf(NotFoundError);
+    await expect(
+      dreamsService.getDreamByClientRequestId(user.id, crypto.randomUUID()),
+    ).rejects.toBeInstanceOf(NotFoundError);
+  });
+
   it('forbids feedback when a completed dream changes away from COMPLETED before submission', async () => {
     const user = await createUserFixture();
     const interpreter = await createInterpreterFixture();

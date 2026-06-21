@@ -21,6 +21,10 @@ export const dreamIdParamSchema = z.object({
   id: z.uuid(),
 });
 
+export const clientRequestIdParamSchema = z.object({
+  clientRequestId: z.uuid(),
+});
+
 export const setBookmarkSchema = z.object({
   bookmarked: z.boolean(),
 });

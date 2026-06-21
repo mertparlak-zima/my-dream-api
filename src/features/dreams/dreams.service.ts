@@ -435,6 +435,23 @@ export const dreamsService = {
     return serializeDream(await findOwnedDream(userId, dreamId));
   },
 
+  // Lets the app recover after a crash/restart: look up the dream a still-pending
+  // local submission may have already created, keyed by its client_request_id.
+  async getDreamByClientRequestId(userId: string, clientRequestId: string): Promise<DreamResponse> {
+    const [dream] = await db
+      .select(dreamDetailSelectFields())
+      .from(dreams)
+      .innerJoin(interpreters, eq(dreams.interpreterId, interpreters.id))
+      .where(and(eq(dreams.userId, userId), eq(dreams.clientRequestId, clientRequestId)))
+      .limit(1);
+
+    if (!dream) {
+      throw new NotFoundError('Ruya bulunamadi.');
+    }
+
+    return serializeDream(dream);
+  },
+
   async deleteDream(userId: string, dreamId: string): Promise<void> {
     const [deleted] = await db
       .delete(dreams)
