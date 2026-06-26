@@ -12,7 +12,10 @@ import { DEFAULT_SEED_MODEL_NAME, DEFAULT_SEED_OPENROUTER_MODEL_ID } from './see
  * drift. Content changes → regenerate a new data migration.
  */
 
-export const DEFAULT_MODEL_ID = '10000000-0000-4000-8000-000000000001';
+// Active model row. The original ...0001 row (baidu/cobuddy:free, shipped in
+// migration 0001) is deprecated; migration 0003 adds this row and repoints the
+// interpreters at it. Bump to a new id when switching models — never mutate a row.
+export const DEFAULT_MODEL_ID = '10000000-0000-4000-8000-000000000002';
 
 export const REFERENCE_MODEL = {
   id: DEFAULT_MODEL_ID,

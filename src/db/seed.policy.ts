@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
 const SEED_MODES = ['local'] as const;
-export const DEFAULT_SEED_OPENROUTER_MODEL_ID = 'baidu/cobuddy:free';
+export const DEFAULT_SEED_OPENROUTER_MODEL_ID = 'openrouter/free';
 export const DEFAULT_SEED_MODEL_NAME = `OpenRouter ${DEFAULT_SEED_OPENROUTER_MODEL_ID}`;
 
 const seedModeSchema = z.enum(SEED_MODES);
