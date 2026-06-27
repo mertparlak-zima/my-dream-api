@@ -68,6 +68,19 @@ describe('runtime config', () => {
       CORS_ALLOWED_ORIGINS: undefined,
       JWT_SECRET: undefined,
       DEV_AUTH_ENABLED: undefined,
+      // Clear all production-required auth keys so they are asserted as missing
+      // (a local .env, auto-loaded by bun, otherwise leaks real values in).
+      BETTER_AUTH_SECRET: undefined,
+      BETTER_AUTH_URL: undefined,
+      GOOGLE_WEB_CLIENT_ID: undefined,
+      GOOGLE_IOS_CLIENT_ID: undefined,
+      GOOGLE_ANDROID_CLIENT_ID: undefined,
+      GOOGLE_WEB_CLIENT_SECRET: undefined,
+      APPLE_SERVICE_ID: undefined,
+      APPLE_APP_BUNDLE_IDENTIFIER: undefined,
+      APPLE_TEAM_ID: undefined,
+      APPLE_KEY_ID: undefined,
+      APPLE_PRIVATE_KEY: undefined,
     });
 
     expect(() => parseRuntimeEnv(process.env)).toThrow(/DATABASE_URL is required in production/);
