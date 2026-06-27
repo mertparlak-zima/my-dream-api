@@ -21,6 +21,7 @@ import {
 import { AUDIT_SOURCE } from '../constants/domain';
 import { writeAudit } from '../features/audit/audit.service';
 import { generateAppleClientSecret } from './apple-client-secret';
+import { resolveStoredAppleEmail } from './apple-email';
 
 const SESSION_EXPIRES_IN_SECONDS = 60 * 60 * 24 * 30; // 30-day rolling inactivity window
 const SESSION_UPDATE_AGE_SECONDS = 60 * 60 * 24; // refresh at most once per day
@@ -54,7 +55,14 @@ const socialProviders = {
     : {}),
   ...(hasAppleConfig
     ? {
-        apple: async (): Promise<{ clientId: string; clientSecret: string; appBundleIdentifier: string }> => ({
+        apple: async (): Promise<{
+          clientId: string;
+          clientSecret: string;
+          appBundleIdentifier: string;
+          mapProfileToUser: (
+            profile: { sub: string; email?: string },
+          ) => Promise<{ email?: string; emailVerified?: boolean }>;
+        }> => ({
           clientId: APPLE_SERVICE_ID!,
           clientSecret: await generateAppleClientSecret(
             APPLE_SERVICE_ID!,
@@ -63,6 +71,21 @@ const socialProviders = {
             APPLE_PRIVATE_KEY!.replace(/\\n/g, '\n'),
           ),
           appBundleIdentifier: APPLE_APP_BUNDLE_IDENTIFIER!,
+          // Apple sends the email claim only on the first authorization; every
+          // returning sign-in omits it, and Better Auth's id-token path requires
+          // an email before it matches the account by `sub`. Backfill the real
+          // stored email for the linked Apple account so returning users keep
+          // signing in. No placeholder email is synthesized — unresolved stays
+          // unresolved and Better Auth fails loud (no silent fallback).
+          mapProfileToUser: async (
+            profile: { sub: string; email?: string },
+          ): Promise<{ email?: string; emailVerified?: boolean }> => {
+            if (profile.email) {
+              return {};
+            }
+            const storedEmail = await resolveStoredAppleEmail(profile.sub);
+            return storedEmail ? { email: storedEmail, emailVerified: true } : {};
+          },
         }),
       }
     : {}),
