@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import { auth } from '../../auth/auth';
+import { DEV_AUTH_ENABLED } from '../../config';
 import { authMiddleware } from '../../middlewares/authMiddleware';
 import { getAuthUserId } from '../../utils/authContext';
 import { zValidator } from '../../utils/zValidator';
@@ -18,11 +19,17 @@ usersRoutes.get('/me', async (c) => {
   return c.json({ success: true, data: user });
 });
 
-// Account deletion (Apple/Google store requirement). Gated on a fresh session:
-// the X-Dev-User-Id dev bypass has no session, so deletion needs real re-auth.
+// Account deletion (Apple/Google store requirement). Gated on a fresh session in
+// production, so real users re-authenticate before a permanent delete. The
+// X-Dev-User-Id dev bypass has no Better Auth session, so it is treated as fresh
+// to keep deletion testable locally. DEV_AUTH_ENABLED is always false in prod, so
+// the re-auth gate always applies there.
 usersRoutes.delete('/me', async (c) => {
-  const session = await auth.api.getSession({ headers: c.req.raw.headers });
-  await deleteCurrentUser(getAuthUserId(c), session?.session.createdAt ?? null);
+  const devAuth = DEV_AUTH_ENABLED && Boolean(c.req.header('X-Dev-User-Id'));
+  const session = devAuth ? null : await auth.api.getSession({ headers: c.req.raw.headers });
+  const sessionCreatedAt = devAuth ? new Date() : (session?.session.createdAt ?? null);
+
+  await deleteCurrentUser(getAuthUserId(c), sessionCreatedAt);
 
   return c.json({ success: true });
 });
