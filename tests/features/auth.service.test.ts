@@ -10,7 +10,7 @@ import { setupDatabaseTestFile } from '../helpers/lifecycle';
 describe('authService.bootstrapProfile', () => {
   setupDatabaseTestFile();
 
-  it('fills first/last name once and ignores later overwrites', async () => {
+  it('fills first/last name once, syncs Better Auth name, and ignores later overwrites', async () => {
     const userId = await seedBareUser();
 
     await authService.bootstrapProfile(userId, { first_name: 'Ada', last_name: 'Lovelace' });
@@ -18,7 +18,18 @@ describe('authService.bootstrapProfile', () => {
     await authService.bootstrapProfile(userId, { first_name: 'Grace', last_name: 'Hopper' });
 
     const stored = await testDb.query.users.findFirst({ where: eq(users.id, userId) });
-    expect(stored).toMatchObject({ firstName: 'Ada', lastName: 'Lovelace' });
+    // Better Auth's built-in `name` is kept in sync with the captured profile name.
+    expect(stored).toMatchObject({ firstName: 'Ada', lastName: 'Lovelace', name: 'Ada Lovelace' });
+  });
+
+  it('leaves the Better Auth name untouched when no name is provided', async () => {
+    const userId = await seedBareUser();
+
+    await authService.bootstrapProfile(userId, {});
+
+    const stored = await testDb.query.users.findFirst({ where: eq(users.id, userId) });
+    // A blank capture must never clobber an existing name with an empty string.
+    expect(stored).toMatchObject({ firstName: null, lastName: null, name: 'Bare User' });
   });
 
   it('returns bookmark_count 0 for a brand-new user', async () => {

@@ -16,8 +16,18 @@ export const authService = {
    * and account creation are owned by Better Auth; this only fills the profile
    * name and only while it is still empty (a logged-in user cannot keep
    * overwriting it). Also ensures the user's domain rows exist.
+   *
+   * Better Auth's built-in `name` column is left empty when Apple omits the name
+   * on a returning sign-in, so we keep it in sync with the captured first/last
+   * name (only when a non-empty name is provided — never clobbering an existing
+   * value with a blank).
    */
   async bootstrapProfile(userId: string, input: BootstrapProfileInput): Promise<UserResponse> {
+    const fullName = [input.first_name, input.last_name]
+      .map((part) => part?.trim())
+      .filter(Boolean)
+      .join(' ');
+
     await db.transaction(async (tx) => {
       await ensureUserDomainState(tx, userId);
 
@@ -26,6 +36,7 @@ export const authService = {
         .set({
           firstName: input.first_name ?? null,
           lastName: input.last_name ?? null,
+          ...(fullName ? { name: fullName } : {}),
           updatedAt: new Date(),
         })
         .where(and(eq(users.id, userId), isNull(users.firstName), isNull(users.lastName)));
