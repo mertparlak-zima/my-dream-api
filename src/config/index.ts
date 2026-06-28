@@ -19,12 +19,20 @@ export const IS_PRODUCTION = NODE_ENV === 'production';
 
 export const DATABASE_URL = runtimeEnv.DATABASE_URL;
 export const REDIS_URL = runtimeEnv.REDIS_URL;
-export const JWT_SECRET = runtimeEnv.JWT_SECRET;
 export const OPENROUTER_API_KEY = runtimeEnv.OPENROUTER_API_KEY;
-export const SUPABASE_URL = runtimeEnv.SUPABASE_URL;
-export const SUPABASE_JWKS_URL = runtimeEnv.SUPABASE_JWKS_URL;
-export const SUPABASE_JWT_ISSUER = runtimeEnv.SUPABASE_JWT_ISSUER;
 export const DEV_AUTH_ENABLED = runtimeEnv.DEV_AUTH_ENABLED;
+
+export const BETTER_AUTH_SECRET = runtimeEnv.BETTER_AUTH_SECRET;
+export const BETTER_AUTH_URL = runtimeEnv.BETTER_AUTH_URL;
+export const GOOGLE_WEB_CLIENT_ID = runtimeEnv.GOOGLE_WEB_CLIENT_ID;
+export const GOOGLE_IOS_CLIENT_ID = runtimeEnv.GOOGLE_IOS_CLIENT_ID;
+export const GOOGLE_ANDROID_CLIENT_ID = runtimeEnv.GOOGLE_ANDROID_CLIENT_ID;
+export const GOOGLE_WEB_CLIENT_SECRET = runtimeEnv.GOOGLE_WEB_CLIENT_SECRET;
+export const APPLE_SERVICE_ID = runtimeEnv.APPLE_SERVICE_ID;
+export const APPLE_APP_BUNDLE_IDENTIFIER = runtimeEnv.APPLE_APP_BUNDLE_IDENTIFIER;
+export const APPLE_TEAM_ID = runtimeEnv.APPLE_TEAM_ID;
+export const APPLE_KEY_ID = runtimeEnv.APPLE_KEY_ID;
+export const APPLE_PRIVATE_KEY = runtimeEnv.APPLE_PRIVATE_KEY;
 
 export const CORS_CONFIG = {
   ALLOWED_ORIGINS: runtimeEnv.CORS_ALLOWED_ORIGINS,
@@ -64,6 +72,10 @@ export const DREAM_PROCESSING_CONFIG = {
   OPENROUTER_CHAT_COMPLETIONS_URL: 'https://openrouter.ai/api/v1/chat/completions',
   OPENROUTER_TEMPERATURE: 0.7,
   OPENROUTER_MAX_TOKENS: 1_200,
+  // Recovery: a claimed dream holds a processing lease; once it expires another
+  // run may reclaim it. A dream that exhausts MAX_ATTEMPTS is terminalized FAILED.
+  MAX_ATTEMPTS: 3,
+  LEASE_MS: 5 * 60 * 1000,
 } as const;
 
 export const PLAN_LIMITS: Record<Plan, number> = {

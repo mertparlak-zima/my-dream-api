@@ -1,7 +1,9 @@
 import { Hono } from 'hono';
+import { auth } from '../../auth/auth';
 import { authMiddleware } from '../../middlewares/authMiddleware';
 import { getAuthUserId } from '../../utils/authContext';
 import { zValidator } from '../../utils/zValidator';
+import { deleteCurrentUser } from './deletion.service';
 import { updatePreferencesSchema } from './user_preferences.schemas';
 import { userPreferencesService } from './user_preferences.service';
 import { usersService } from './users.service';
@@ -14,6 +16,15 @@ usersRoutes.get('/me', async (c) => {
   const user = await usersService.getCurrentUser(getAuthUserId(c));
 
   return c.json({ success: true, data: user });
+});
+
+// Account deletion (Apple/Google store requirement). Gated on a fresh session:
+// the X-Dev-User-Id dev bypass has no session, so deletion needs real re-auth.
+usersRoutes.delete('/me', async (c) => {
+  const session = await auth.api.getSession({ headers: c.req.raw.headers });
+  await deleteCurrentUser(getAuthUserId(c), session?.session.createdAt ?? null);
+
+  return c.json({ success: true });
 });
 
 usersRoutes.get('/me/preferences', async (c) => {

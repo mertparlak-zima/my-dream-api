@@ -1,8 +1,27 @@
+import { createHash } from 'node:crypto';
+
 import { eq } from 'drizzle-orm';
-import { AUTH_PROVIDER, CREDIT_TRANSACTION_TYPE, DREAM_STATUS, PLAN } from '../../src/constants/domain';
+import {
+  AUTH_PROVIDER,
+  DREAM_STATUS,
+  LEDGER_REASON,
+  PLAN,
+  QUOTA_KEY,
+  type LedgerReason,
+} from '../../src/constants/domain';
 import { DEFAULT_SEED_OPENROUTER_MODEL_ID } from '../../src/db/seed.policy';
-import { getNextWeeklyResetDate } from '../../src/utils/date';
-import { aiModels, creditTransactions, dreams, interpreters, users } from '../../src/db/schema';
+import {
+  accounts,
+  aiModels,
+  creditTransactions,
+  dreams,
+  interpreters,
+  userEntitlements,
+  userUsage,
+  userWallets,
+  users,
+} from '../../src/db/schema';
+import { getWeekStartUtc } from '../../src/features/credits/quota-window';
 import { cleanupTestData, ensureUserExists, markCreated, testDb } from './db';
 
 const TEST_EMAIL_PREFIX = 'vitest+';
@@ -13,13 +32,12 @@ const SMOKE_MODEL_NAME = `Smoke OpenRouter ${DEFAULT_SEED_OPENROUTER_MODEL_ID}`;
 type UserFixtureInput = {
   id?: string;
   email?: string;
-  authProvider?: (typeof AUTH_PROVIDER)[keyof typeof AUTH_PROVIDER];
+  authProvider?: (typeof AUTH_PROVIDER)[keyof typeof AUTH_PROVIDER] | null;
   providerId?: string;
   firstName?: string | null;
   lastName?: string | null;
   plan?: (typeof PLAN)[keyof typeof PLAN];
   weeklyDreamCount?: number;
-  limitResetDate?: Date;
   extraCredits?: number;
 };
 
@@ -57,18 +75,32 @@ type DreamFixtureInput = {
   userRating?: number | null;
   userFeedbackText?: string | null;
   isBookmarked?: boolean;
+  clientRequestId?: string;
+  completedAt?: Date | null;
+  failedAt?: Date | null;
 };
 
 type CreditFixtureInput = {
   userId: string;
   amount?: number;
-  transactionType?: (typeof CREDIT_TRANSACTION_TYPE)[keyof typeof CREDIT_TRANSACTION_TYPE];
+  balanceAfter?: number;
+  reason?: LedgerReason;
   relatedDreamId?: string | null;
+  idempotencyKey?: string | null;
 };
 
 function testToken(): string {
   return crypto.randomUUID();
 }
+
+function testRequestHash(seed: string): string {
+  return createHash('sha256').update(seed).digest('hex');
+}
+
+const PROVIDER_ID_BY_AUTH: Record<(typeof AUTH_PROVIDER)[keyof typeof AUTH_PROVIDER], string> = {
+  [AUTH_PROVIDER.GOOGLE]: 'google',
+  [AUTH_PROVIDER.APPLE]: 'apple',
+};
 
 export function authDevHeaders(userId: string): Record<string, string> {
   return { 'X-Dev-User-Id': userId };
@@ -77,24 +109,65 @@ export function authDevHeaders(userId: string): Record<string, string> {
 export async function createUserFixture(input: UserFixtureInput = {}) {
   const now = new Date();
   const id = input.id ?? crypto.randomUUID();
+  const firstName = input.firstName ?? 'Vitest';
+  const lastName = input.lastName ?? 'User';
 
   await testDb.insert(users).values({
     id,
+    name: `${firstName} ${lastName}`.trim() || 'Vitest User',
     email: input.email ?? `${TEST_EMAIL_PREFIX}${testToken()}@mydream.local`,
-    authProvider: input.authProvider ?? AUTH_PROVIDER.GOOGLE,
-    providerId: input.providerId ?? `${TEST_TEXT_PREFIX}${testToken()}`,
-    firstName: input.firstName ?? 'Vitest',
-    lastName: input.lastName ?? 'User',
-    plan: input.plan ?? PLAN.FREE,
-    weeklyDreamCount: input.weeklyDreamCount ?? 0,
-    limitResetDate: input.limitResetDate ?? getNextWeeklyResetDate(now),
-    extraCredits: input.extraCredits ?? 0,
+    emailVerified: true,
+    firstName,
+    lastName,
     updatedAt: now,
   });
+
+  // A linked social account drives the displayed provider identity. `null`
+  // models an email/password (no social) user.
+  const authProvider = input.authProvider === undefined ? AUTH_PROVIDER.GOOGLE : input.authProvider;
+  if (authProvider) {
+    await testDb.insert(accounts).values({
+      userId: id,
+      providerId: PROVIDER_ID_BY_AUTH[authProvider],
+      accountId: input.providerId ?? `${TEST_TEXT_PREFIX}${testToken()}`,
+      updatedAt: now,
+    });
+  }
+
+  await testDb.insert(userEntitlements).values({ userId: id, plan: input.plan ?? PLAN.FREE });
+  await testDb.insert(userWallets).values({ userId: id, balance: input.extraCredits ?? 0 });
+
+  if (input.weeklyDreamCount && input.weeklyDreamCount > 0) {
+    await testDb.insert(userUsage).values({
+      userId: id,
+      quotaKey: QUOTA_KEY.weekly_free_dream,
+      windowStartedAt: getWeekStartUtc(now),
+      usedCount: input.weeklyDreamCount,
+    });
+  }
 
   markCreated('user', id);
 
   return { id, headers: authDevHeaders(id) };
+}
+
+/**
+ * Inserts a minimal Better Auth user with NO name and NO domain rows, modelling a
+ * user that Better Auth has just created but whose profile/domain state has not
+ * been provisioned yet (used to exercise the profile-bootstrap first-fill path).
+ */
+export async function seedBareUser(): Promise<string> {
+  const now = new Date();
+  const id = crypto.randomUUID();
+  await testDb.insert(users).values({
+    id,
+    name: 'Bare User',
+    email: `${TEST_EMAIL_PREFIX}${testToken()}@mydream.local`,
+    emailVerified: true,
+    updatedAt: now,
+  });
+  markCreated('user', id);
+  return id;
 }
 
 export async function createModelFixture(input: ModelFixtureInput = {}) {
@@ -172,10 +245,10 @@ export async function createSmokeInterpreterFixture(
   });
 }
 
-
 export async function createDreamFixture(input: DreamFixtureInput) {
   const now = new Date();
   const id = crypto.randomUUID();
+  const status = input.status ?? DREAM_STATUS.PENDING;
 
   await testDb.insert(dreams).values({
     id,
@@ -183,10 +256,15 @@ export async function createDreamFixture(input: DreamFixtureInput) {
     interpreterId: input.interpreterId,
     content: input.content ?? `${TEST_TEXT_PREFIX}dream content`,
     interpretation: input.interpretation ?? null,
-    status: input.status ?? DREAM_STATUS.PENDING,
+    status,
     userRating: input.userRating ?? null,
     userFeedbackText: input.userFeedbackText ?? null,
     isBookmarked: input.isBookmarked ?? false,
+    clientRequestId: input.clientRequestId ?? crypto.randomUUID(),
+    requestHash: testRequestHash(id),
+    queuedAt: now,
+    completedAt: input.completedAt ?? (status === DREAM_STATUS.COMPLETED ? now : null),
+    failedAt: input.failedAt ?? (status === DREAM_STATUS.FAILED ? now : null),
     updatedAt: now,
   });
 
@@ -197,13 +275,16 @@ export async function createDreamFixture(input: DreamFixtureInput) {
 
 export async function createCreditFixture(input: CreditFixtureInput) {
   const id = crypto.randomUUID();
+  const amount = input.amount ?? 1;
 
   await testDb.insert(creditTransactions).values({
     id,
     userId: input.userId,
-    amount: input.amount ?? 1,
-    transactionType: input.transactionType ?? CREDIT_TRANSACTION_TYPE.PURCHASED,
+    amount,
+    balanceAfter: input.balanceAfter ?? Math.max(amount, 0),
+    reason: input.reason ?? LEDGER_REASON.purchase,
     relatedDreamId: input.relatedDreamId ?? null,
+    idempotencyKey: input.idempotencyKey ?? null,
   });
 
   markCreated('credit', id);

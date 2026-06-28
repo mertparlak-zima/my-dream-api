@@ -1,63 +1,98 @@
+import { symmetricEncrypt } from 'better-auth/crypto';
+import { and, eq, isNull } from 'drizzle-orm';
+
+import { exchangeAppleAuthorizationCode } from '../../auth/apple-token';
+import { BETTER_AUTH_SECRET } from '../../config';
 import { db } from '../../db';
-import { users } from '../users/users.schema';
-import { getNextWeeklyResetDate } from '../../utils/date';
-import { NotFoundError } from '../../errors/NotFoundError';
-import { countUserBookmarks, serializeUser, type UserResponse } from '../users/users.service';
-import { logger, serializeError } from '../../utils/logger';
+import { accounts, users } from '../../db/schema/auth';
+import { logger } from '../../utils/logger';
 import { addSentryBreadcrumb } from '../../utils/sentry';
-import type { SyncUserInput } from './auth.schemas';
+import { AUDIT_SOURCE } from '../../constants/domain';
+import { writeAudit } from '../audit/audit.service';
+import { ensureUserDomainState } from '../credits/credit-engine';
+import { usersService, type UserResponse } from '../users/users.service';
+import type { AppleCredentialInput, BootstrapProfileInput } from './auth.schemas';
+
+/** Apple provider id as Better Auth records it in the `accounts` table. */
+const APPLE_PROVIDER_ID = 'apple';
 
 export const authService = {
-  async syncUser(userId: string, input: SyncUserInput): Promise<UserResponse> {
-    const now = new Date();
-    const updateValues = {
-      email: input.email,
-      authProvider: input.auth_provider,
-      providerId: input.provider_id,
-      ...(input.first_name ? { firstName: input.first_name } : {}),
-      ...(input.last_name ? { lastName: input.last_name } : {}),
-      updatedAt: now,
-    };
+  /**
+   * Persists the first/last name captured at first social authorization. Identity
+   * and account creation are owned by Better Auth; this only fills the profile
+   * name and only while it is still empty (a logged-in user cannot keep
+   * overwriting it). Also ensures the user's domain rows exist.
+   *
+   * Better Auth's built-in `name` column is left empty when Apple omits the name
+   * on a returning sign-in, so we keep it in sync with the captured first/last
+   * name (only when a non-empty name is provided — never clobbering an existing
+   * value with a blank).
+   */
+  async bootstrapProfile(userId: string, input: BootstrapProfileInput): Promise<UserResponse> {
+    const fullName = [input.first_name, input.last_name]
+      .map((part) => part?.trim())
+      .filter(Boolean)
+      .join(' ');
 
-    try {
-      const [syncedUser] = await db
-        .insert(users)
-        .values({
-          id: userId,
-          email: input.email,
-          authProvider: input.auth_provider,
-          providerId: input.provider_id,
+    await db.transaction(async (tx) => {
+      await ensureUserDomainState(tx, userId);
+
+      await tx
+        .update(users)
+        .set({
           firstName: input.first_name ?? null,
           lastName: input.last_name ?? null,
-          limitResetDate: getNextWeeklyResetDate(now),
-          updatedAt: now,
+          ...(fullName ? { name: fullName } : {}),
+          updatedAt: new Date(),
         })
-        .onConflictDoUpdate({
-          target: users.id,
-          set: updateValues,
-        })
-        .returning();
+        .where(and(eq(users.id, userId), isNull(users.firstName), isNull(users.lastName)));
 
-      if (!syncedUser) {
-        throw new NotFoundError('Kullanici senkronize edilemedi.');
-      }
+      await writeAudit(
+        { event: 'PROFILE_BOOTSTRAP', source: AUDIT_SOURCE.api, actorUserId: userId, targetUserId: userId },
+        tx,
+      );
+    });
 
-      logger.info('auth sync succeeded', { op: 'auth.sync', userId, authProvider: input.auth_provider });
-      addSentryBreadcrumb('auth.sync', 'Supabase user synced', {
-        authProvider: input.auth_provider,
-        userId,
-      });
+    logger.info('profile bootstrap', { op: 'auth.bootstrap', userId });
+    addSentryBreadcrumb('auth.bootstrap', 'Profile name bootstrapped', { userId });
 
-      return serializeUser(syncedUser, await countUserBookmarks(syncedUser.id));
-    } catch (error) {
-      logger.error('auth sync failed', { op: 'auth.sync', userId, err: serializeError(error) });
-      addSentryBreadcrumb('auth.sync', 'Supabase user sync failed', {
-        authProvider: input.auth_provider,
-        errorName: error instanceof Error ? error.name : 'UnknownError',
-        userId,
-      }, 'error');
+    return usersService.getCurrentUser(userId);
+  },
 
-      throw error;
+  /**
+   * Captures a revocable Apple refresh token for the signed-in user. The native
+   * id-token sign-in path never yields one, so the app forwards the Apple
+   * `authorizationCode` (issued fresh on every sign-in) right after login; we
+   * exchange it for a refresh token and persist it — encrypted at rest with the
+   * same `symmetricEncrypt` Better Auth uses for OAuth tokens — on the linked
+   * Apple account row.
+   *
+   * Why: at account deletion we must revoke this token (App Store Guideline
+   * 5.1.1(v)); without it a returning Sign in with Apple never re-shares the
+   * email and the user is locked out of re-registering. The fresh-session gate
+   * on deletion lines up with this: a deletable session was just authenticated,
+   * so the freshest token is already stored.
+   *
+   * Apple may legitimately omit a refresh token (e.g. nothing to rotate); that
+   * is recorded, not synthesized, and account deletion later treats a token-less
+   * Apple account as `skipped_no_token` rather than failing.
+   */
+  async storeAppleRefreshToken(userId: string, input: AppleCredentialInput): Promise<void> {
+    const { refreshToken } = await exchangeAppleAuthorizationCode(input.authorization_code);
+
+    if (!refreshToken) {
+      logger.warn('apple exchange returned no refresh token', { op: 'auth.apple.credential', userId });
+      return;
     }
+
+    const encryptedRefreshToken = await symmetricEncrypt({ key: BETTER_AUTH_SECRET!, data: refreshToken });
+
+    await db
+      .update(accounts)
+      .set({ refreshToken: encryptedRefreshToken })
+      .where(and(eq(accounts.userId, userId), eq(accounts.providerId, APPLE_PROVIDER_ID)));
+
+    logger.info('apple refresh token stored', { op: 'auth.apple.credential', userId });
+    addSentryBreadcrumb('auth.apple.credential', 'Apple refresh token stored', { userId });
   },
 };

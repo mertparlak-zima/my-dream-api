@@ -1,7 +1,7 @@
 import { pgTable, timestamp, uuid } from 'drizzle-orm/pg-core';
 import { DEFAULT_LANGUAGE, DEFAULT_TEXT_SIZE } from '../../constants/domain';
 import { languageEnum, textSizeEnum } from '../../db/enums';
-import { users } from './users.schema';
+import { users } from '../../db/schema/auth';
 
 /**
  * Per-user UI preferences (de-dummy #48). 1:1 with users; a row is created

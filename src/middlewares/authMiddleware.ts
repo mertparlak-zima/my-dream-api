@@ -1,57 +1,15 @@
 import { createMiddleware } from 'hono/factory';
-import { createRemoteJWKSet, decodeProtectedHeader, jwtVerify, type JWTPayload } from 'jose';
+import { auth } from '../auth/auth';
+import { DEV_AUTH_ENABLED } from '../config';
 import { AuthError } from '../errors/AuthError';
 import { setLogUser } from '../utils/logger';
-import {
-  DEV_AUTH_ENABLED,
-  JWT_SECRET,
-  SUPABASE_JWKS_URL,
-  SUPABASE_JWT_ISSUER,
-} from '../config';
 
-let remoteJwks: ReturnType<typeof createRemoteJWKSet> | undefined;
-
-function getRemoteJwks(): ReturnType<typeof createRemoteJWKSet> | undefined {
-  if (!SUPABASE_JWKS_URL) {
-    return undefined;
-  }
-
-  remoteJwks ??= createRemoteJWKSet(new URL(SUPABASE_JWKS_URL));
-  return remoteJwks;
-}
-
-function getSubject(payload: JWTPayload): string {
-  if (typeof payload.sub !== 'string' || payload.sub.length === 0) {
-    throw new AuthError();
-  }
-
-  return payload.sub;
-}
-
-function isHmacToken(token: string): boolean {
-  const { alg } = decodeProtectedHeader(token);
-  return Boolean(alg?.startsWith('HS'));
-}
-
-async function verifyAuthToken(token: string): Promise<string> {
-  const verifyOptions = SUPABASE_JWT_ISSUER ? { issuer: SUPABASE_JWT_ISSUER } : undefined;
-
-  if (JWT_SECRET && isHmacToken(token)) {
-    const secret = new TextEncoder().encode(JWT_SECRET);
-    const { payload } = await jwtVerify(token, secret);
-    return getSubject(payload);
-  }
-
-  const jwks = getRemoteJwks();
-
-  if (!jwks) {
-    throw new AuthError();
-  }
-
-  const { payload } = await jwtVerify(token, jwks, verifyOptions);
-  return getSubject(payload);
-}
-
+/**
+ * Resolves the authenticated user from the Better Auth session (cookie/header)
+ * via `auth.api.getSession`. In development/test, an explicit `X-Dev-User-Id`
+ * header bypasses session verification (the seeded local dev user). Identity is
+ * owned entirely by Better Auth — there is no JWT/JWKS verification here.
+ */
 export const authMiddleware = createMiddleware(async (c, next) => {
   const devUserId = c.req.header('X-Dev-User-Id');
 
@@ -62,23 +20,13 @@ export const authMiddleware = createMiddleware(async (c, next) => {
     return;
   }
 
-  const authorization = c.req.header('Authorization');
-  const token = authorization?.startsWith('Bearer ') ? authorization.slice('Bearer '.length) : undefined;
+  const session = await auth.api.getSession({ headers: c.req.raw.headers });
 
-  if (!token) {
+  if (!session) {
     throw new AuthError();
   }
 
-  try {
-    const userId = await verifyAuthToken(token);
-    c.set('userId', userId);
-    setLogUser(userId);
-    await next();
-  } catch (error) {
-    if (error instanceof AuthError) {
-      throw error;
-    }
-
-    throw new AuthError();
-  }
+  c.set('userId', session.user.id);
+  setLogUser(session.user.id);
+  await next();
 });

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { NotFoundError } from '../../src/errors/NotFoundError';
-import { countUserBookmarks, serializeUser, usersService } from '../../src/features/users/users.service';
+import { countUserBookmarks, usersService } from '../../src/features/users/users.service';
 import {
   createDreamFixture,
   createInterpreterFixture,
@@ -59,26 +59,11 @@ describe('usersService.getCurrentUser', () => {
     await expect(usersService.getCurrentUser(crypto.randomUUID())).rejects.toBeInstanceOf(NotFoundError);
   });
 
-  it('serializeUser embeds the provided bookmark count into the response', () => {
-    const now = new Date();
-    const row = {
-      id: '00000000-0000-4000-8000-000000000001',
-      email: 'dev@mydream.local',
-      authProvider: 'GOOGLE',
-      providerId: 'dev-provider',
-      firstName: 'Dev',
-      lastName: 'User',
-      plan: 'FREE',
-      weeklyDreamCount: 0,
-      limitResetDate: now,
-      extraCredits: 5,
-      createdAt: now,
-      updatedAt: now,
-    } as never;
+  it('maps the linked social account to the auth provider', async () => {
+    const user = await createUserFixture({ authProvider: 'APPLE' });
 
-    expect(serializeUser(row, 7)).toMatchObject({
-      id: row.id,
-      bookmark_count: 7,
-    });
+    const response = await usersService.getCurrentUser(user.id);
+
+    expect(response.auth_provider).toBe('APPLE');
   });
 });

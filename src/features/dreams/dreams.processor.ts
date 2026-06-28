@@ -1,31 +1,25 @@
-import { and, desc, eq, inArray, sql } from 'drizzle-orm';
+import { randomUUID } from 'node:crypto';
+
+import { and, eq, isNull, lt, or, sql } from 'drizzle-orm';
 import { DREAM_PROCESSING_CONFIG } from '../../config';
-import { CREDIT_TRANSACTION_TYPE, DREAM_STATUS } from '../../constants/domain';
+import { DREAM_STATUS } from '../../constants/domain';
 import { db } from '../../db';
 import { AppError } from '../../errors/AppError';
 import { logger, serializeError } from '../../utils/logger';
 import { captureDreamProcessingError } from '../../utils/sentry';
 import { aiModels } from '../ai_models/models.schema';
-import { creditTransactions } from '../credits/credits.schema';
+import { refundDream, type DreamRefundInput, type Tx } from '../credits/credit-engine';
 import { interpreters } from '../interpreters/interpreters.schema';
-import { users } from '../users/users.schema';
 import { dreams } from './dreams.schema';
 import type { DreamInterpretationProvider } from './dreams.provider';
 import { OpenRouterDreamInterpretationProvider } from './openrouter.provider';
-
-type SpendTransactionType =
-  | typeof CREDIT_TRANSACTION_TYPE.USED_WEEKLY
-  | typeof CREDIT_TRANSACTION_TYPE.USED_EXTRA;
 
 export type ProcessDreamOptions = {
   completionDelayMs?: number;
   provider?: DreamInterpretationProvider;
 };
 
-const SPEND_TRANSACTION_TYPES: SpendTransactionType[] = [
-  CREDIT_TRANSACTION_TYPE.USED_WEEKLY,
-  CREDIT_TRANSACTION_TYPE.USED_EXTRA,
-];
+const { MAX_ATTEMPTS, LEASE_MS } = DREAM_PROCESSING_CONFIG;
 
 const defaultProvider = new OpenRouterDreamInterpretationProvider();
 let scheduledProvider: DreamInterpretationProvider = defaultProvider;
@@ -54,6 +48,113 @@ function sanitizeInterpretation(interpretation: string): string {
   return normalized.slice(0, DREAM_PROCESSING_CONFIG.MAX_INTERPRETATION_LENGTH).trimEnd();
 }
 
+const refundSelect = {
+  id: dreams.id,
+  userId: dreams.userId,
+  quotaSource: dreams.quotaSource,
+  quotaKey: dreams.quotaKey,
+  quotaWindowStartedAt: dreams.quotaWindowStartedAt,
+  quotaUnitsConsumed: dreams.quotaUnitsConsumed,
+  usedCoins: dreams.usedCoins,
+} as const;
+
+/**
+ * Atomically claims a dream for processing: only a PENDING dream or a PROCESSING
+ * one whose lease has expired, and only while it has attempts left. Bumps the
+ * attempt counter and stamps a fresh attempt id + lease so a stale worker can
+ * never overwrite a newer attempt's result.
+ */
+async function claimDream(dreamId: string, attemptId: string, now: Date): Promise<boolean> {
+  // Raw sql params: timestamptz values are passed as ISO strings (the driver does
+  // not bind a JS Date instance inside a template literal).
+  const nowIso = now.toISOString();
+  const leaseExpiryIso = new Date(now.getTime() + LEASE_MS).toISOString();
+  const rows = await db.execute(sql`
+    UPDATE dreams
+    SET status = ${DREAM_STATUS.PROCESSING},
+        processing_attempt_id = ${attemptId},
+        processing_started_at = ${nowIso},
+        processing_lease_expires_at = ${leaseExpiryIso},
+        attempt_count = attempt_count + 1,
+        updated_at = ${nowIso}
+    WHERE id = ${dreamId}
+      AND attempt_count < ${MAX_ATTEMPTS}
+      AND (status = 'PENDING' OR (status = 'PROCESSING' AND processing_lease_expires_at < ${nowIso}))
+    RETURNING id
+  `);
+  return rows.length > 0;
+}
+
+/**
+ * Claims the refund for a (FAILED) dream exactly once via the refunded_at guard,
+ * then restores quota/wallet to the original source. Idempotent under retries
+ * and concurrent sweeps.
+ */
+async function claimAndRefund(tx: Tx, dreamId: string, now: Date): Promise<void> {
+  const [claimed] = await tx
+    .update(dreams)
+    .set({ refundedAt: now, updatedAt: now })
+    .where(and(eq(dreams.id, dreamId), isNull(dreams.refundedAt)))
+    .returning(refundSelect);
+
+  /* v8 ignore next 3 -- defensive: a concurrent sweep already claimed the refund */
+  if (!claimed) {
+    return;
+  }
+
+  const refundTransactionId = await refundDream(tx, claimed as DreamRefundInput, now);
+
+  if (refundTransactionId) {
+    await tx
+      .update(dreams)
+      .set({ refundTransactionId, updatedAt: now })
+      .where(eq(dreams.id, dreamId));
+  }
+}
+
+/** Marks a still-active dream FAILED (guarded) and refunds it in one transaction. */
+async function transitionToFailedAndRefund(
+  dreamId: string,
+  attemptId: string | null,
+  errorCode: string,
+): Promise<void> {
+  const now = new Date();
+  await db.transaction(async (tx) => {
+    const guard = attemptId
+      ? and(
+          eq(dreams.id, dreamId),
+          eq(dreams.processingAttemptId, attemptId),
+          eq(dreams.status, DREAM_STATUS.PROCESSING),
+        )
+      : and(
+          eq(dreams.id, dreamId),
+          or(
+            eq(dreams.status, DREAM_STATUS.PENDING),
+            and(eq(dreams.status, DREAM_STATUS.PROCESSING), lt(dreams.processingLeaseExpiresAt, now)),
+          ),
+        );
+
+    const [failed] = await tx
+      .update(dreams)
+      .set({
+        status: DREAM_STATUS.FAILED,
+        failedAt: now,
+        lastError: errorCode,
+        processingLeaseExpiresAt: null,
+        updatedAt: now,
+      })
+      .where(guard)
+      .returning({ id: dreams.id });
+
+    /* v8 ignore next 3 -- defensive: another worker already moved the dream off this attempt */
+    if (!failed) {
+      return;
+    }
+
+    await claimAndRefund(tx, dreamId, now);
+  });
+}
+
 export function scheduleDreamProcessing(dreamId: string): void {
   setTimeout(() => {
     void processDream(dreamId, { provider: scheduledProvider }).catch((error: unknown) => {
@@ -72,27 +173,11 @@ export async function processDream(
 ): Promise<void> {
   const completionDelayMs = options.completionDelayMs ?? DREAM_PROCESSING_CONFIG.COMPLETION_DELAY_MS;
   const provider = options.provider ?? defaultProvider;
-  const now = new Date();
-  const [processingDream] = await db
-    .update(dreams)
-    .set({ status: DREAM_STATUS.PROCESSING, updatedAt: now })
-    .where(and(eq(dreams.id, dreamId), eq(dreams.status, DREAM_STATUS.PENDING)))
-    .returning({ id: dreams.id });
+  const attemptId = randomUUID();
+  const claimed = await claimDream(dreamId, attemptId, new Date());
 
-  if (!processingDream) {
-    const [existingDream] = await db
-      .select({
-        status: dreams.status,
-        userId: dreams.userId,
-      })
-      .from(dreams)
-      .where(eq(dreams.id, dreamId))
-      .limit(1);
-
-    if (existingDream?.status === DREAM_STATUS.FAILED) {
-      await refundDreamCredit(existingDream.userId, dreamId);
-    }
-
+  if (!claimed) {
+    await handleUnclaimableDream(dreamId);
     return;
   }
 
@@ -105,7 +190,6 @@ export async function processDream(
       id: dreams.id,
       userId: dreams.userId,
       content: dreams.content,
-      status: dreams.status,
       interpreterId: interpreters.id,
       interpreterName: interpreters.name,
       interpreterSystemPrompt: interpreters.systemPrompt,
@@ -114,10 +198,16 @@ export async function processDream(
     .from(dreams)
     .innerJoin(interpreters, eq(dreams.interpreterId, interpreters.id))
     .innerJoin(aiModels, eq(interpreters.modelId, aiModels.id))
-    .where(eq(dreams.id, dreamId))
+    .where(
+      and(
+        eq(dreams.id, dreamId),
+        eq(dreams.processingAttemptId, attemptId),
+        eq(dreams.status, DREAM_STATUS.PROCESSING),
+      ),
+    )
     .limit(1);
 
-  if (!dream || dream.status !== DREAM_STATUS.PROCESSING) {
+  if (!dream) {
     return;
   }
 
@@ -133,9 +223,7 @@ export async function processDream(
         name: dream.interpreterName,
         systemPrompt: dream.interpreterSystemPrompt,
       },
-      model: {
-        openrouterModelId: dream.openrouterModelId,
-      },
+      model: { openrouterModelId: dream.openrouterModelId },
     });
     const interpretation = sanitizeInterpretation(result.interpretation);
 
@@ -143,14 +231,23 @@ export async function processDream(
       throw new Error('Dream interpretation provider returned empty content.');
     }
 
+    const completedAt = new Date();
     await db
       .update(dreams)
       .set({
         status: DREAM_STATUS.COMPLETED,
         interpretation,
-        updatedAt: new Date(),
+        completedAt,
+        processingLeaseExpiresAt: null,
+        updatedAt: completedAt,
       })
-      .where(and(eq(dreams.id, dreamId), eq(dreams.status, DREAM_STATUS.PROCESSING)));
+      .where(
+        and(
+          eq(dreams.id, dreamId),
+          eq(dreams.processingAttemptId, attemptId),
+          eq(dreams.status, DREAM_STATUS.PROCESSING),
+        ),
+      );
 
     logger.info('dream interpretation succeeded', { op: 'dream.process', dreamId: dream.id });
   } catch (error) {
@@ -164,77 +261,83 @@ export async function processDream(
       status: error instanceof AppError ? error.statusCode : undefined,
     });
 
-    const [failedDream] = await db
-      .update(dreams)
-      .set({
-        status: DREAM_STATUS.FAILED,
-        updatedAt: new Date(),
-      })
-      .where(and(eq(dreams.id, dreamId), eq(dreams.status, DREAM_STATUS.PROCESSING)))
-      .returning({ id: dreams.id, userId: dreams.userId });
-
-    if (failedDream) {
-      await refundDreamCredit(failedDream.userId, dreamId);
-    }
+    await transitionToFailedAndRefund(dreamId, attemptId, 'PROVIDER_ERROR');
   }
 }
 
-async function refundDreamCredit(userId: string, dreamId: string): Promise<void> {
-  await db.transaction(async (tx) => {
-    const [existingRefund] = await tx
-      .select({ id: creditTransactions.id })
-      .from(creditTransactions)
-      .where(and(
-        eq(creditTransactions.relatedDreamId, dreamId),
-        eq(creditTransactions.transactionType, CREDIT_TRANSACTION_TYPE.REFUNDED),
-      ))
-      .limit(1);
+/**
+ * A claim can fail for three reasons: the dream is already terminal/held, it has
+ * exhausted its attempts (terminalize + refund), or it is FAILED but not yet
+ * refunded (finish the refund). This keeps the in-process model free of "stuck"
+ * dreams even before the outbox/worker milestone.
+ */
+async function handleUnclaimableDream(dreamId: string): Promise<void> {
+  const now = new Date();
+  const [dream] = await db
+    .select({
+      status: dreams.status,
+      attemptCount: dreams.attemptCount,
+      refundedAt: dreams.refundedAt,
+      leaseExpiresAt: dreams.processingLeaseExpiresAt,
+    })
+    .from(dreams)
+    .where(eq(dreams.id, dreamId))
+    .limit(1);
 
-    if (existingRefund) {
-      return;
-    }
+  if (!dream) {
+    return;
+  }
 
-    const [spend] = await tx
-      .select({ transactionType: creditTransactions.transactionType })
-      .from(creditTransactions)
-      .where(
-        and(
-          eq(creditTransactions.userId, userId),
-          eq(creditTransactions.relatedDreamId, dreamId),
-          inArray(creditTransactions.transactionType, SPEND_TRANSACTION_TYPES),
-        ),
-      )
-      .orderBy(desc(creditTransactions.createdAt))
-      .limit(1);
+  const isStuck =
+    dream.status === DREAM_STATUS.PENDING ||
+    (dream.status === DREAM_STATUS.PROCESSING &&
+      dream.leaseExpiresAt !== null &&
+      dream.leaseExpiresAt.getTime() < now.getTime());
 
-    if (!spend) {
-      return;
-    }
+  if (isStuck && dream.attemptCount >= MAX_ATTEMPTS) {
+    await transitionToFailedAndRefund(dreamId, null, 'MAX_ATTEMPTS_EXCEEDED');
+    return;
+  }
 
-    await tx.insert(creditTransactions).values({
-      userId,
-      transactionType: CREDIT_TRANSACTION_TYPE.REFUNDED,
-      amount: 1,
-      relatedDreamId: dreamId,
+  if (dream.status === DREAM_STATUS.FAILED && dream.refundedAt === null) {
+    await db.transaction(async (tx) => {
+      await claimAndRefund(tx, dreamId, now);
     });
+  }
+}
 
-    if (spend.transactionType === CREDIT_TRANSACTION_TYPE.USED_WEEKLY) {
-      await tx
-        .update(users)
-        .set({
-          weeklyDreamCount: sql<number>`greatest(${users.weeklyDreamCount} - 1, 0)`,
-          updatedAt: new Date(),
-        })
-        .where(eq(users.id, userId));
-      return;
-    }
+/**
+ * Startup/periodic sweeper: re-drives PENDING or lease-expired PROCESSING dreams
+ * and settles FAILED-but-unrefunded ones. Safe to run concurrently (every write
+ * is guarded).
+ */
+export async function recoverStuckDreams(): Promise<void> {
+  const now = new Date();
 
-    await tx
-      .update(users)
-      .set({
-        extraCredits: sql<number>`${users.extraCredits} + 1`,
-        updatedAt: new Date(),
-      })
-      .where(eq(users.id, userId));
-  });
+  const stuck = await db
+    .select({ id: dreams.id })
+    .from(dreams)
+    .where(
+      or(
+        eq(dreams.status, DREAM_STATUS.PENDING),
+        and(eq(dreams.status, DREAM_STATUS.PROCESSING), lt(dreams.processingLeaseExpiresAt, now)),
+      ),
+    )
+    .limit(100);
+
+  for (const { id } of stuck) {
+    await processDream(id, { provider: scheduledProvider });
+  }
+
+  const unrefunded = await db
+    .select({ id: dreams.id })
+    .from(dreams)
+    .where(and(eq(dreams.status, DREAM_STATUS.FAILED), isNull(dreams.refundedAt)))
+    .limit(100);
+
+  for (const { id } of unrefunded) {
+    await db.transaction(async (tx) => {
+      await claimAndRefund(tx, id, new Date());
+    });
+  }
 }

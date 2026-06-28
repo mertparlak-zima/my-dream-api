@@ -39,10 +39,17 @@ lines. Only listed files are gated — when you add a gated module, add full tes
 - **Rate limiting:** currently global `app.use('*', createRateLimitMiddleware())`,
   Redis sliding-window with an in-memory fallback; client key `local-dev` in dev.
   Being hardened per #65 (Redis-only, env+zod config, env-aware keying).
-- **Auth:** `authMiddleware` verifies Supabase JWT (JWKS) or HS JWT. Local dev:
-  set `DEV_AUTH_ENABLED=true` and the client sends `X-Dev-User-Id` (the seeded
-  dev user id `00000000-0000-4000-8000-000000000001`). Auth-required routes 401
-  without it; `/interpreters` is public.
+- **Auth (Better Auth, Step 7):** identity is owned by Better Auth (mounted at
+  `/api/auth/*`); `authMiddleware` resolves the user via `auth.api.getSession`
+  (cookie/header) — no JWT/JWKS. Tables `users`/`accounts`/`sessions`/
+  `verifications` (UUID, plural) are Better Auth's; app FKs point to `users.id`.
+  Domain state is decomposed: `user_entitlements` (plan), `user_usage` (quota
+  window), `user_wallets` (coin balance), immutable `credit_transactions` ledger,
+  `entitlement_history`, lightweight `audit_logs`. `ensureUserDomainState` lazily
+  provisions the 1:1 rows inside the mutation tx. Local dev: `DEV_AUTH_ENABLED=true`
+  + `X-Dev-User-Id` (seeded dev user `00000000-0000-4000-8000-000000000001`);
+  dev/test also enable email/password. Auth-required routes 401 without it;
+  `/interpreters` is public. Spec: `docs/specs/2026-06-21-better-auth-postgres-migration.md`.
 - **Migrations quirk:** `drizzle-kit migrate` can fail opaquely on local. Use the
   ORM migrator (`drizzle-orm/postgres-js/migrator`) via a one-off script when
   `drizzle-kit migrate` exits non-zero. Reference/dummy data ships to prod via

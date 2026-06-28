@@ -126,11 +126,20 @@ describe('rateLimitMiddleware', () => {
     const { app } = await createRateLimitApp({
       NODE_ENV: 'production',
       DATABASE_URL: 'postgres://mydream:mydream@localhost:5433/mydream',
-      JWT_SECRET: 'production-test-secret',
       OPENROUTER_API_KEY: 'openrouter-test-key',
-      SUPABASE_URL: 'https://example.supabase.co',
       CORS_ALLOWED_ORIGINS: 'https://mydream.zimastack.com',
       DEV_AUTH_ENABLED: 'false',
+      BETTER_AUTH_SECRET: 'x'.repeat(32),
+      BETTER_AUTH_URL: 'https://api.example.com',
+      GOOGLE_WEB_CLIENT_ID: 'g-web',
+      GOOGLE_IOS_CLIENT_ID: 'g-ios',
+      GOOGLE_ANDROID_CLIENT_ID: 'g-and',
+      GOOGLE_WEB_CLIENT_SECRET: 'g-sec',
+      APPLE_SERVICE_ID: 'a-svc',
+      APPLE_APP_BUNDLE_IDENTIFIER: 'a-bundle',
+      APPLE_TEAM_ID: 'a-team',
+      APPLE_KEY_ID: 'a-key',
+      APPLE_PRIVATE_KEY: 'a-pk',
     });
 
     const response1 = await app.request('/ping', {
@@ -155,11 +164,20 @@ describe('rateLimitMiddleware', () => {
     const { app } = await createRateLimitApp({
       NODE_ENV: 'production',
       DATABASE_URL: 'postgres://mydream:mydream@localhost:5433/mydream',
-      JWT_SECRET: 'production-test-secret',
       OPENROUTER_API_KEY: 'openrouter-test-key',
-      SUPABASE_URL: 'https://example.supabase.co',
       CORS_ALLOWED_ORIGINS: 'https://mydream.zimastack.com',
       DEV_AUTH_ENABLED: 'false',
+      BETTER_AUTH_SECRET: 'x'.repeat(32),
+      BETTER_AUTH_URL: 'https://api.example.com',
+      GOOGLE_WEB_CLIENT_ID: 'g-web',
+      GOOGLE_IOS_CLIENT_ID: 'g-ios',
+      GOOGLE_ANDROID_CLIENT_ID: 'g-and',
+      GOOGLE_WEB_CLIENT_SECRET: 'g-sec',
+      APPLE_SERVICE_ID: 'a-svc',
+      APPLE_APP_BUNDLE_IDENTIFIER: 'a-bundle',
+      APPLE_TEAM_ID: 'a-team',
+      APPLE_KEY_ID: 'a-key',
+      APPLE_PRIVATE_KEY: 'a-pk',
     });
 
     const response1 = await app.request('/ping', {

@@ -240,17 +240,23 @@ describe('roadmap 0008 route contracts', () => {
     });
   });
 
-  it('GET /credits/me returns NOT_FOUND for an authenticated user id that does not exist', async () => {
+  it('GET /credits/me returns default FREE credits for an id without domain rows', async () => {
     const { response, json } = await requestJson('/credits/me', {
       headers: { 'X-Dev-User-Id': crypto.randomUUID() },
     });
 
-    expect(response.status).toBe(404);
+    // The decomposed credit read falls back to defaults (no provisioning on read);
+    // a user that has never spent simply sees the FREE allowance.
+    expect(response.status).toBe(200);
     expect(json).toEqual({
-      success: false,
-      error: {
-        code: 'NOT_FOUND',
-        message: expect.any(String),
+      success: true,
+      data: {
+        plan: 'FREE',
+        weekly_dream_count: 0,
+        weekly_limit: 1,
+        weekly_remaining: 1,
+        extra_credits: 0,
+        limit_reset_date: expect.any(String),
       },
     });
   });
@@ -265,6 +271,7 @@ describe('roadmap 0008 route contracts', () => {
       body: {
         content: 'I was walking through a quiet hallway toward an open window.',
         interpreter_id: interpreter.id,
+        client_request_id: crypto.randomUUID(),
       },
     });
 

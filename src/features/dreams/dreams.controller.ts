@@ -3,6 +3,7 @@ import { authMiddleware } from '../../middlewares/authMiddleware';
 import { getAuthUserId } from '../../utils/authContext';
 import { zValidator } from '../../utils/zValidator';
 import {
+  clientRequestIdParamSchema,
   createDreamSchema,
   dreamIdParamSchema,
   listDreamsQuerySchema,
@@ -26,6 +27,20 @@ dreamsRoutes.post('/', zValidator('json', createDreamSchema), async (c) => {
 
   return c.json({ success: true, data: dream }, 202);
 });
+
+// Registered before /:id so the literal segment is not captured as an id param.
+dreamsRoutes.get(
+  '/by-client-request-id/:clientRequestId',
+  zValidator('param', clientRequestIdParamSchema),
+  async (c) => {
+    const dream = await dreamsService.getDreamByClientRequestId(
+      getAuthUserId(c),
+      c.req.valid('param').clientRequestId,
+    );
+
+    return c.json({ success: true, data: dream });
+  },
+);
 
 dreamsRoutes.get('/:id', zValidator('param', dreamIdParamSchema), async (c) => {
   const dream = await dreamsService.getDreamById(getAuthUserId(c), c.req.valid('param').id);
