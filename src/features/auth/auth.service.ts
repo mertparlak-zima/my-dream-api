@@ -1,14 +1,20 @@
+import { symmetricEncrypt } from 'better-auth/crypto';
 import { and, eq, isNull } from 'drizzle-orm';
 
+import { exchangeAppleAuthorizationCode } from '../../auth/apple-token';
+import { BETTER_AUTH_SECRET } from '../../config';
 import { db } from '../../db';
-import { users } from '../../db/schema/auth';
+import { accounts, users } from '../../db/schema/auth';
 import { logger } from '../../utils/logger';
 import { addSentryBreadcrumb } from '../../utils/sentry';
 import { AUDIT_SOURCE } from '../../constants/domain';
 import { writeAudit } from '../audit/audit.service';
 import { ensureUserDomainState } from '../credits/credit-engine';
 import { usersService, type UserResponse } from '../users/users.service';
-import type { BootstrapProfileInput } from './auth.schemas';
+import type { AppleCredentialInput, BootstrapProfileInput } from './auth.schemas';
+
+/** Apple provider id as Better Auth records it in the `accounts` table. */
+const APPLE_PROVIDER_ID = 'apple';
 
 export const authService = {
   /**
@@ -51,5 +57,42 @@ export const authService = {
     addSentryBreadcrumb('auth.bootstrap', 'Profile name bootstrapped', { userId });
 
     return usersService.getCurrentUser(userId);
+  },
+
+  /**
+   * Captures a revocable Apple refresh token for the signed-in user. The native
+   * id-token sign-in path never yields one, so the app forwards the Apple
+   * `authorizationCode` (issued fresh on every sign-in) right after login; we
+   * exchange it for a refresh token and persist it — encrypted at rest with the
+   * same `symmetricEncrypt` Better Auth uses for OAuth tokens — on the linked
+   * Apple account row.
+   *
+   * Why: at account deletion we must revoke this token (App Store Guideline
+   * 5.1.1(v)); without it a returning Sign in with Apple never re-shares the
+   * email and the user is locked out of re-registering. The fresh-session gate
+   * on deletion lines up with this: a deletable session was just authenticated,
+   * so the freshest token is already stored.
+   *
+   * Apple may legitimately omit a refresh token (e.g. nothing to rotate); that
+   * is recorded, not synthesized, and account deletion later treats a token-less
+   * Apple account as `skipped_no_token` rather than failing.
+   */
+  async storeAppleRefreshToken(userId: string, input: AppleCredentialInput): Promise<void> {
+    const { refreshToken } = await exchangeAppleAuthorizationCode(input.authorization_code);
+
+    if (!refreshToken) {
+      logger.warn('apple exchange returned no refresh token', { op: 'auth.apple.credential', userId });
+      return;
+    }
+
+    const encryptedRefreshToken = await symmetricEncrypt({ key: BETTER_AUTH_SECRET!, data: refreshToken });
+
+    await db
+      .update(accounts)
+      .set({ refreshToken: encryptedRefreshToken })
+      .where(and(eq(accounts.userId, userId), eq(accounts.providerId, APPLE_PROVIDER_ID)));
+
+    logger.info('apple refresh token stored', { op: 'auth.apple.credential', userId });
+    addSentryBreadcrumb('auth.apple.credential', 'Apple refresh token stored', { userId });
   },
 };

@@ -9,7 +9,14 @@ type Inserter = Pick<typeof db, 'insert'>;
  * Metadata is a deliberately small whitelist of non-sensitive keys. Never log
  * tokens, emails, receipts, cookies or auth headers (see Sentry scrubber).
  */
-const METADATA_WHITELIST = ['provider', 'reason', 'deletion_request_id', 'previous_plan', 'new_plan'] as const;
+const METADATA_WHITELIST = [
+  'provider',
+  'reason',
+  'deletion_request_id',
+  'previous_plan',
+  'new_plan',
+  'apple_revoke',
+] as const;
 const MAX_METADATA_KEYS = METADATA_WHITELIST.length;
 
 export type AuditInput = {

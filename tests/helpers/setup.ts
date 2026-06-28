@@ -13,6 +13,10 @@ const fallbackDatabaseUrl =
 
 process.env.NODE_ENV = 'development';
 process.env.DEV_AUTH_ENABLED = process.env.DEV_AUTH_ENABLED ?? 'true';
+// Deterministic secret so Apple refresh-token encrypt/decrypt (symmetricEncrypt)
+// is reproducible in tests without depending on a local `.env`.
+process.env.BETTER_AUTH_SECRET =
+  process.env.BETTER_AUTH_SECRET ?? 'test-better-auth-secret-0123456789abcdef';
 process.env.TEST_DATABASE_URL = fallbackDatabaseUrl;
 process.env.DATABASE_URL = fallbackDatabaseUrl;
 // Structured logger (#61) stays silent during the test suite.

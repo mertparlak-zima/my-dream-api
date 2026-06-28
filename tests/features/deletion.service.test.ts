@@ -1,14 +1,50 @@
+import { symmetricEncrypt } from 'better-auth/crypto';
 import { and, eq, isNull } from 'drizzle-orm';
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { PLAN } from '../../src/constants/domain';
-import { auditLogs, creditTransactions, dreams, userWallets, users } from '../../src/db/schema';
+import { BETTER_AUTH_SECRET } from '../../src/config';
+import { AUTH_PROVIDER, PLAN } from '../../src/constants/domain';
+import { accounts, auditLogs, creditTransactions, dreams, userWallets, users } from '../../src/db/schema';
+import { AppleTokenError } from '../../src/errors/AppleTokenError';
 import { ForbiddenError } from '../../src/errors/ForbiddenError';
 import { deleteCurrentUser, isSessionFresh } from '../../src/features/users/deletion.service';
 import { dreamsService } from '../../src/features/dreams/dreams.service';
 import { testDb } from '../helpers/db';
 import { createInterpreterFixture, createUserFixture, resetFixtures } from '../helpers/fixtures';
 import { setupDatabaseTestFile } from '../helpers/lifecycle';
+
+vi.mock('../../src/auth/apple-token', () => ({
+  exchangeAppleAuthorizationCode: vi.fn(),
+  revokeAppleToken: vi.fn(),
+}));
+
+import { revokeAppleToken } from '../../src/auth/apple-token';
+
+const revokeMock = vi.mocked(revokeAppleToken);
+
+/** Encrypts a raw Apple refresh token the same way the credential exchange does. */
+async function storeEncryptedAppleToken(userId: string, rawToken: string): Promise<void> {
+  const data = await symmetricEncrypt({ key: BETTER_AUTH_SECRET!, data: rawToken });
+  await testDb
+    .update(accounts)
+    .set({ refreshToken: data })
+    .where(and(eq(accounts.userId, userId), eq(accounts.providerId, 'apple')));
+}
+
+async function readDeletionAudit(): Promise<Record<string, unknown> | null> {
+  const [audit] = await testDb
+    .select({ metadata: auditLogs.metadata })
+    .from(auditLogs)
+    .where(and(eq(auditLogs.event, 'ADMIN_ACTION'), isNull(auditLogs.targetUserId)));
+
+  return (audit?.metadata as Record<string, unknown> | undefined) ?? null;
+}
+
+/** The anonymized deletion audit row has a null target, so resetFixtures (which
+ * only tracks created fixtures) cannot reclaim it — clean it explicitly. */
+async function cleanupAnonymizedAudit(): Promise<void> {
+  await testDb.delete(auditLogs).where(isNull(auditLogs.targetUserId));
+}
 
 describe('isSessionFresh', () => {
   it('accepts a session created within the freshness window', () => {
@@ -23,6 +59,11 @@ describe('isSessionFresh', () => {
 
 describe('deleteCurrentUser', () => {
   setupDatabaseTestFile();
+
+  beforeEach(() => {
+    revokeMock.mockReset();
+    revokeMock.mockResolvedValue(undefined);
+  });
 
   it('refuses deletion without a fresh session and keeps the user', async () => {
     const user = await createUserFixture();
@@ -71,6 +112,44 @@ describe('deleteCurrentUser', () => {
     // Cleanup the anonymized leftovers this test intentionally created.
     await testDb.delete(creditTransactions).where(isNull(creditTransactions.userId));
     await testDb.delete(auditLogs).where(isNull(auditLogs.targetUserId));
+  });
+
+  it('revokes the stored Apple grant before deleting and records apple_revoke=revoked', async () => {
+    const user = await createUserFixture({ authProvider: AUTH_PROVIDER.APPLE });
+    await storeEncryptedAppleToken(user.id, 'apple-refresh-token');
+
+    await deleteCurrentUser(user.id, new Date());
+
+    // Apple grant revoked with the decrypted token + correct hint (App Store 5.1.1(v)).
+    expect(revokeMock).toHaveBeenCalledWith('apple-refresh-token', 'refresh_token');
+    expect(await testDb.query.users.findFirst({ where: eq(users.id, user.id) })).toBeUndefined();
+    expect(await readDeletionAudit()).toMatchObject({ reason: 'account_deletion', apple_revoke: 'revoked' });
+
+    await cleanupAnonymizedAudit();
+  });
+
+  it('fails loud and keeps the user when Apple rejects the revocation', async () => {
+    const user = await createUserFixture({ authProvider: AUTH_PROVIDER.APPLE });
+    await storeEncryptedAppleToken(user.id, 'apple-refresh-token');
+    revokeMock.mockRejectedValue(new AppleTokenError());
+
+    await expect(deleteCurrentUser(user.id, new Date())).rejects.toBeInstanceOf(AppleTokenError);
+
+    // Deletion aborted before the tx: the user (and no anonymized audit) remains.
+    expect(await testDb.query.users.findFirst({ where: eq(users.id, user.id) })).toBeTruthy();
+    expect(await readDeletionAudit()).toBeNull();
+  });
+
+  it('skips revocation for a token-less Apple account and records skipped_no_token', async () => {
+    const user = await createUserFixture({ authProvider: AUTH_PROVIDER.APPLE });
+
+    await deleteCurrentUser(user.id, new Date());
+
+    expect(revokeMock).not.toHaveBeenCalled();
+    expect(await testDb.query.users.findFirst({ where: eq(users.id, user.id) })).toBeUndefined();
+    expect(await readDeletionAudit()).toMatchObject({ apple_revoke: 'skipped_no_token' });
+
+    await cleanupAnonymizedAudit();
   });
 
   afterEach(async () => {
